@@ -1,0 +1,89 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: croms-db
+    environment:
+      POSTGRES_DB: croms
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - croms_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d croms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  croms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: croms-mini:latest
+    container_name: croms-mini
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - JWT_SECRET=change-me-in-production
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/croms
+      - ADMIN_SEED_EMAIL=admin@croms.local
+      - ADMIN_SEED_PASSWORD=Admin@12345
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  croms-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: deps
+    image: croms-mini-dev:latest
+    container_name: croms-mini-dev
+    working_dir: /app/backend
+    command: npm run dev
+    ports:
+      - "4001:4000"
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - JWT_SECRET=change-me-in-production
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/croms
+      - ADMIN_SEED_EMAIL=admin@croms.local
+      - ADMIN_SEED_PASSWORD=Admin@12345
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+      - ./favicon_io:/app/favicon_io
+      - /app/backend/node_modules
+    profiles:
+      - dev
+
+  web-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web-deps
+    image: croms-web-dev:latest
+    container_name: croms-web-dev
+    working_dir: /app/web
+    command: npm run dev
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_PROXY_TARGET=http://croms-dev:4000
+    depends_on:
+      - croms-dev
+    volumes:
+      - ./web:/app/web
+      - /app/web/node_modules
+    profiles:
+      - dev
+
+volumes:
+  croms_db_data:
