@@ -18,6 +18,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_method_type') THEN
     CREATE TYPE payment_method_type AS ENUM ('paybill', 'till', 'phone', 'bank');
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'confirmation_status') THEN
+    CREATE TYPE confirmation_status AS ENUM ('pending', 'approved', 'rejected');
+  END IF;
 END $$;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -92,6 +95,26 @@ CREATE TABLE IF NOT EXISTS payment_methods (
   method_type payment_method_type NOT NULL,
   value TEXT NOT NULL,
   label TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS confirmation_queue (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  suggested_contributor_id UUID REFERENCES contributors(id) ON DELETE SET NULL,
+  parsed_amount NUMERIC(14, 2) NOT NULL,
+  parsed_sender_name TEXT NOT NULL,
+  parsed_transaction_code TEXT UNIQUE NOT NULL,
+  parsed_timestamp TEXT NOT NULL,
+  parsed_source source_type NOT NULL,
+  raw_text TEXT NOT NULL,
+  proposed_display_name TEXT,
+  proposed_identity_type identity_type,
+  match_score NUMERIC(5, 2),
+  review_reason TEXT,
+  status confirmation_status NOT NULL DEFAULT 'pending',
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

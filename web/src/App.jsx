@@ -29,6 +29,8 @@ function App() {
   const [contributors, setContributors] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [confirmations, setConfirmations] = useState([]);
+  const [reviewDrafts, setReviewDrafts] = useState({});
   const [summaryText, setSummaryText] = useState("Select a campaign to load the WhatsApp summary.");
   const [activityLog, setActivityLog] = useState("CrOMS React console ready.");
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
@@ -55,11 +57,6 @@ function App() {
   const [forgotForm, setForgotForm] = useState({ email: seedCredentials.email });
   const [resetForm, setResetForm] = useState({ token: "", password: "" });
 
-  const selectedCampaign = useMemo(
-    () => campaigns.find((campaign) => campaign.id === selectedCampaignId) || null,
-    [campaigns, selectedCampaignId]
-  );
-
   const dashboardStats = useMemo(() => {
     const totalRaised = campaigns.reduce((sum, campaign) => sum + Number(campaign.total_raised || 0), 0);
     const activeCampaigns = campaigns.filter((campaign) => campaign.status === "active").length;
@@ -69,8 +66,9 @@ function App() {
       activeCampaigns,
       contributors: contributors.length,
       totalRaised,
+      pendingConfirmations: confirmations.length,
     };
-  }, [groups, campaigns, contributors]);
+  }, [groups, campaigns, contributors, confirmations]);
 
   async function api(path, options = {}) {
     const headers = { ...(options.headers || {}) };
@@ -136,6 +134,7 @@ function App() {
         setContributors([]);
         setTransactions([]);
         setPaymentMethods([]);
+        setConfirmations([]);
       }
     } finally {
       setLoading(false);
@@ -147,15 +146,17 @@ function App() {
       return;
     }
 
-    const [contributorsData, transactionsData, methodsData] = await Promise.all([
+    const [contributorsData, transactionsData, methodsData, confirmationsData] = await Promise.all([
       api(`/api/contributors/${campaignId}`),
       api(`/api/transactions/${campaignId}`),
       api(`/api/payment-methods/campaign/${campaignId}`),
+      api(`/api/confirmations?campaignId=${campaignId}&status=pending`),
     ]);
 
     setContributors(contributorsData);
     setTransactions(transactionsData);
     setPaymentMethods(methodsData);
+    setConfirmations(confirmationsData);
   }
 
   async function loadSummary(campaignId = selectedCampaignId) {
@@ -166,6 +167,25 @@ function App() {
 
     const response = await api(`/api/summary/${campaignId}/whatsapp`);
     setSummaryText(response.summary);
+  }
+
+  function ensureReviewDraft(item) {
+    return reviewDrafts[item.id] || {
+      contributorId: item.suggested_contributor_id || "",
+      displayName: item.proposed_display_name || item.parsed_sender_name,
+      identityType: item.proposed_identity_type || item.suggested_identity_type || "individual",
+      rejectionReason: item.review_reason || "",
+    };
+  }
+
+  function updateReviewDraft(id, field, value) {
+    setReviewDrafts((current) => ({
+      ...current,
+      [id]: {
+        ...(current[id] || {}),
+        [field]: value,
+      },
+    }));
   }
 
   async function handleLogin(event) {
@@ -307,11 +327,46 @@ function App() {
         method: "POST",
         body: JSON.stringify(parseForm),
       });
-      setLog("Transaction parsed and stored", response);
+      setLog(response.status === "queued" ? "Transaction queued for review" : "Transaction parsed and stored", response);
       await refreshCoreData(parseForm.campaignId);
-      await loadSummary(parseForm.campaignId);
+      if (response.status === "saved") {
+        await loadSummary(parseForm.campaignId);
+      }
     } catch (error) {
       setLog("Parse failed", error.message);
+    }
+  }
+
+  async function handleApproveConfirmation(item) {
+    const draft = ensureReviewDraft(item);
+    try {
+      const response = await api(`/api/confirmations/${item.id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({
+          contributorId: draft.contributorId || undefined,
+          displayName: draft.displayName || undefined,
+          identityType: draft.identityType || undefined,
+        }),
+      });
+      setLog("Confirmation approved", response);
+      await refreshCoreData(item.campaign_id);
+      await loadSummary(item.campaign_id);
+    } catch (error) {
+      setLog("Approve confirmation failed", error.message);
+    }
+  }
+
+  async function handleRejectConfirmation(item) {
+    const draft = ensureReviewDraft(item);
+    try {
+      const response = await api(`/api/confirmations/${item.id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: draft.rejectionReason || undefined }),
+      });
+      setLog("Confirmation rejected", response);
+      await refreshCoreData(item.campaign_id);
+    } catch (error) {
+      setLog("Reject confirmation failed", error.message);
     }
   }
 
@@ -338,6 +393,8 @@ function App() {
     setContributors([]);
     setTransactions([]);
     setPaymentMethods([]);
+    setConfirmations([]);
+    setReviewDrafts({});
     setSelectedCampaignId("");
     setSummaryText("Select a campaign to load the WhatsApp summary.");
     setLog("Logged out", "Session cleared.");
@@ -374,7 +431,7 @@ function App() {
             <h1>Web Operations Console</h1>
             <p className="subcopy">
               React web frontend aligned to the blueprint modules: auth, groups, campaigns, parsing,
-              contributors, payment methods, summaries, and reporting.
+              confirmations, contributors, payment methods, summaries, and reporting.
             </p>
           </div>
         </div>
@@ -387,11 +444,12 @@ function App() {
         </div>
       </header>
 
-      <section className="stats-grid">
+      <section className="stats-grid stats-grid-five">
         <StatCard label="Groups" value={dashboardStats.groups} detail="Community structures" />
         <StatCard label="Campaigns" value={dashboardStats.campaigns} detail={`${dashboardStats.activeCampaigns} active`} />
         <StatCard label="Contributors" value={dashboardStats.contributors} detail="Identities tracked" />
         <StatCard label="Raised" value={`KES ${numberFormat(dashboardStats.totalRaised)}`} detail="Across visible campaigns" />
+        <StatCard label="Pending Review" value={dashboardStats.pendingConfirmations} detail="Treasurer queue" />
       </section>
 
       <section className="grid grid-auth">
@@ -521,18 +579,57 @@ function App() {
           </div>
         </Panel>
 
-        <Panel title="Transaction Parsing Engine" subtitle="Regex-first parsing flow with contributor matching and duplicate protection.">
+        <Panel title="Transaction Parsing Engine" subtitle="Regex-first parsing flow with a treasurer confirmation queue for ambiguous identities.">
           <form className="form-grid compact" onSubmit={handleParseTransaction}>
             <SelectField label="Campaign" value={parseForm.campaignId} options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))} onChange={(value) => setParseForm((current) => ({ ...current, campaignId: value }))} />
-            <TextField label="Display Name" value={parseForm.displayName} onChange={(value) => setParseForm((current) => ({ ...current, displayName: value }))} />
+            <TextField label="Suggested Display Name" value={parseForm.displayName} onChange={(value) => setParseForm((current) => ({ ...current, displayName: value }))} />
             <SelectField label="Identity Type" value={parseForm.identityType} options={identityTypes} onChange={(value) => setParseForm((current) => ({ ...current, identityType: value }))} />
             <TextAreaField label="Raw MPesa / Bank Message" value={parseForm.rawText} onChange={(value) => setParseForm((current) => ({ ...current, rawText: value }))} rows={6} />
-            <button className="primary-button" type="submit">Parse and Save</button>
+            <button className="primary-button" type="submit">Parse and Continue</button>
           </form>
         </Panel>
       </section>
 
       <section className="grid grid-reporting">
+        <Panel title="Treasurer Confirmation Queue" subtitle="Review ambiguous identity matches before contributions affect totals.">
+          <div className="stack-list queue-list">
+            {confirmations.length === 0 ? <p className="empty-note">No pending confirmations for the focused campaign.</p> : null}
+            {confirmations.map((item) => {
+              const draft = ensureReviewDraft(item);
+              return (
+                <article className="list-card queue-card" key={item.id}>
+                  <div className="list-card-top">
+                    <div>
+                      <strong>{item.parsed_sender_name}</strong>
+                      <p>{item.review_reason}</p>
+                    </div>
+                    <span className="badge neutral">Score {item.match_score ? Number(item.match_score).toFixed(2) : "n/a"}</span>
+                  </div>
+                  <div className="metric-row queue-meta">
+                    <span>Amount: KES {numberFormat(item.parsed_amount)}</span>
+                    <span>Tx: {item.parsed_transaction_code}</span>
+                  </div>
+                  <div className="form-grid compact queue-form">
+                    <SelectField
+                      label="Use Existing Contributor"
+                      value={draft.contributorId}
+                      options={contributors.map((contributor) => ({ value: contributor.id, label: `${contributor.display_name} (${contributor.identity_type})` }))}
+                      onChange={(value) => updateReviewDraft(item.id, "contributorId", value)}
+                    />
+                    <TextField label="Display Name" value={draft.displayName} onChange={(value) => updateReviewDraft(item.id, "displayName", value)} />
+                    <SelectField label="Identity Type" value={draft.identityType} options={identityTypes} onChange={(value) => updateReviewDraft(item.id, "identityType", value)} />
+                    <TextField label="Reject Reason" value={draft.rejectionReason} onChange={(value) => updateReviewDraft(item.id, "rejectionReason", value)} />
+                  </div>
+                  <div className="button-row">
+                    <button className="primary-button" type="button" onClick={() => handleApproveConfirmation(item)}>Approve and Save</button>
+                    <button className="ghost-button" type="button" onClick={() => handleRejectConfirmation(item)}>Reject</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </Panel>
+
         <Panel title="WhatsApp Summary Generator" subtitle="Campaign messaging with totals, target, deficit, and payment instructions.">
           <div className="button-row compact-row">
             <SelectField label="Focused Campaign" value={selectedCampaignId} options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))} onChange={(value) => setSelectedCampaignId(value)} />
@@ -541,8 +638,10 @@ function App() {
           </div>
           <pre className="console-box">{summaryText}</pre>
         </Panel>
+      </section>
 
-        <Panel title="Contributors and Transactions" subtitle="Identity records, senders, and contribution history for the selected campaign.">
+      <section className="grid grid-footer">
+        <Panel title="Contributors and Transactions" subtitle="Identity records and confirmed contribution history for the selected campaign.">
           <div className="split-columns">
             <div>
               <h3>Contributors</h3>
@@ -570,21 +669,8 @@ function App() {
             </div>
           </div>
         </Panel>
-      </section>
-
-      <section className="grid grid-footer">
-        <Panel title="Operational Log" subtitle="Recent responses and API workflow visibility.">
+        <Panel title="Operational Log" subtitle="Recent responses and workflow visibility.">
           <pre className="console-box tall">{activityLog}</pre>
-        </Panel>
-        <Panel title="Blueprint Coverage" subtitle="What this web app now aligns with in the blueprint.">
-          <ul className="coverage-list">
-            <li>React web frontend replacing the previous static page.</li>
-            <li>Authentication, user roles, and password recovery interfaces.</li>
-            <li>Group creation, branding inputs, and member assignment workflow.</li>
-            <li>Campaign progress visualization with active and closed states.</li>
-            <li>Dedicated payment method and parse flows aligned to the API design.</li>
-            <li>Contributor identities, transactions, WhatsApp summaries, and CSV export access.</li>
-          </ul>
         </Panel>
       </section>
     </div>

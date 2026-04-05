@@ -6,6 +6,7 @@ import { config } from "./config";
 import { initializeDatabase } from "./db/init";
 import { authRouter } from "./routes/auth";
 import { campaignsRouter } from "./routes/campaigns";
+import { confirmationsRouter } from "./routes/confirmations";
 import { contributorsRouter } from "./routes/contributors";
 import { groupsRouter } from "./routes/groups";
 import { parseRouter } from "./routes/parse";
@@ -34,6 +35,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/groups", groupsRouter);
 app.use("/api/campaigns", campaignsRouter);
+app.use("/api/confirmations", confirmationsRouter);
 app.use("/api/parse", parseRouter);
 app.use("/api/payment-methods", paymentMethodsRouter);
 app.use("/api/transactions", transactionsRouter);
