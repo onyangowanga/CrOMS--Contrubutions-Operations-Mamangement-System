@@ -25,10 +25,23 @@ const webDistRoot = path.resolve(__dirname, "../../web/dist");
 const webRoot = fs.existsSync(webDistRoot) ? webDistRoot : path.resolve(__dirname, "../../web");
 const faviconRoot = path.resolve(__dirname, "../../favicon_io");
 const docsRoot = path.resolve(__dirname, "../../docs");
+const treasurerManualFile = "CrOMS_Treasurer_User_Manual_Formatted.pdf";
 
 app.use("/assets", express.static(faviconRoot));
-app.use("/manuals", express.static(docsRoot));
 app.use(express.static(webRoot));
+
+app.get("/manuals/:fileName", (req, res) => {
+  if (req.params.fileName !== treasurerManualFile) {
+    return res.status(404).json({ error: "Manual not found" });
+  }
+
+  const manualPath = path.join(docsRoot, treasurerManualFile);
+  if (!fs.existsSync(manualPath)) {
+    return res.status(404).json({ error: "Manual not found" });
+  }
+
+  return res.download(manualPath, treasurerManualFile);
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "CrOMS API" });

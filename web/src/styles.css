@@ -1234,6 +1234,16 @@ button {
   align-items: center;
 }
 
+.contributor-table .contributor-row {
+  gap: 10px;
+}
+
+.contributor-table .contributor-row strong,
+.contributor-table .contributor-row span {
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
 .transaction-delete-button {
   min-height: 40px;
   padding: 0 14px;
@@ -1389,6 +1399,10 @@ button {
 
   .list-row {
     grid-template-columns: 1fr;
+  }
+
+  .contributor-table .contributor-row {
+    grid-template-columns: minmax(0, 1.45fr) minmax(76px, 0.7fr) minmax(92px, 0.8fr);
   }
 
   .hero-actions {
@@ -1676,6 +1690,26 @@ button {
 
   .route-link {
     text-align: center;
+  }
+
+  .contributor-table {
+    gap: 6px;
+  }
+
+  .contributor-table .contributor-row {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .contributor-table .contributor-row strong,
+  .contributor-table .contributor-row span {
+    font-size: 0.78rem;
+    line-height: 1.28;
+  }
+
+  .contributor-table .table-head {
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
   }
 
   .account-menu {

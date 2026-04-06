@@ -317,6 +317,56 @@ Action:
 - re-enter your current password carefully
 - confirm you are working inside your assigned group campaigns
 
+## Frequently Asked Questions
+
+### Why did a payment go to Pending Review instead of saving immediately?
+
+CrOMS could not confidently match the sender name to one contributor record.
+
+What to do:
+
+- open the pending review item
+- choose the correct contributor or type the correct display name
+- approve it to post the contribution
+
+### Why should I use Preview Allocation?
+
+Use it when one payment should be shared across several active campaigns in the same group.
+
+What it does:
+
+- suggests how much each campaign should receive
+- lets you adjust the split before posting
+- keeps one real payment linked to multiple campaign transactions
+
+### Why is the paybill account reference required?
+
+Many campaigns share one paybill number but use different account numbers or account names.
+
+What to do:
+
+- enter the campaign-specific account name or account number when saving a paybill method
+- confirm the reference matches the campaign before sharing the WhatsApp summary
+
+### Why does the PDF manual open as a web page sometimes?
+
+This usually means the deployed app is serving the main website instead of the PDF file.
+
+What to do:
+
+- make sure the latest version of the app is deployed
+- confirm the manual file exists in the deployed environment
+- try the help popup download link again after deployment is refreshed
+
+### Can the contributor table still work on a phone?
+
+Yes. The contributor export is intended to stay compact enough for mobile screens.
+
+What to do:
+
+- rotate the phone to landscape if names are especially long
+- use the CSV export if you need a fuller spreadsheet-style view
+
 ## Security Notes
 
 - never share your login password

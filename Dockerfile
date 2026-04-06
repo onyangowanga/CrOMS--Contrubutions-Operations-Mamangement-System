@@ -28,6 +28,7 @@ COPY --from=build /app/backend/dist ./backend/dist
 COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/package.json ./backend/package.json
 COPY --from=web-build /app/web/dist ./web/dist
+COPY docs ./docs
 COPY favicon_io ./favicon_io
 USER node
 EXPOSE 4000

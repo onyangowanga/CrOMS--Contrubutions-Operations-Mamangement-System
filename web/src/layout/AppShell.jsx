@@ -38,6 +38,15 @@ const helpSections = [
       "Open WhatsApp launches WhatsApp Web or the WhatsApp app with the summary text prefilled.",
     ],
   },
+  {
+    title: "Frequently Asked Questions",
+    items: [
+      "Why is a payment queued for review? CrOMS could not confidently identify the contributor, so the treasurer must confirm the name before posting.",
+      "Why does Preview Allocation matter? It helps split one payment across active campaigns in the same group before the money is saved.",
+      "Why is a paybill account reference required? Each campaign may use the same paybill number but a different account name or number.",
+      "Why would a PDF download fail? The server must have the current manual file inside the deployed container and the latest app build running.",
+    ],
+  },
 ];
 
 export default function AppShell() {
