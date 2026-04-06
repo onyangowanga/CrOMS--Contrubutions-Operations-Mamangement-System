@@ -1,11 +1,17 @@
 import { Router } from "express";
 import { pool } from "../db/client";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { getRequestUser, requireAuth, requireRole } from "../middleware/auth";
+import { getAccessibleCampaign } from "../lib/access";
 
 const paymentMethodsRouter = Router();
 paymentMethodsRouter.use(requireAuth);
 
 paymentMethodsRouter.get("/campaign/:campaignId", async (req, res) => {
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), req.params.campaignId);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
   const result = await pool.query(
     "SELECT * FROM payment_methods WHERE campaign_id = $1 ORDER BY created_at ASC",
     [req.params.campaignId]
@@ -20,6 +26,11 @@ paymentMethodsRouter.post("/", requireRole("admin", "treasurer"), async (req, re
     return res.status(400).json({ error: "campaignId, methodType, value, and label are required" });
   }
 
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), campaignId);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
   const result = await pool.query(
     "INSERT INTO payment_methods (campaign_id, method_type, value, label) VALUES ($1, $2::payment_method_type, $3, $4) RETURNING *",
     [campaignId, methodType, value, label]
@@ -30,6 +41,20 @@ paymentMethodsRouter.post("/", requireRole("admin", "treasurer"), async (req, re
 
 paymentMethodsRouter.patch("/:id", requireRole("admin", "treasurer"), async (req, res) => {
   const { methodType, value, label } = req.body;
+  const paymentMethod = await pool.query(
+    "SELECT pm.id, pm.campaign_id FROM payment_methods pm WHERE pm.id = $1",
+    [req.params.id]
+  );
+
+  if ((paymentMethod.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Payment method not found" });
+  }
+
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), paymentMethod.rows[0].campaign_id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Payment method not found" });
+  }
+
   const result = await pool.query(
     `
     UPDATE payment_methods
@@ -50,6 +75,20 @@ paymentMethodsRouter.patch("/:id", requireRole("admin", "treasurer"), async (req
 });
 
 paymentMethodsRouter.delete("/:id", requireRole("admin", "treasurer"), async (req, res) => {
+  const paymentMethod = await pool.query(
+    "SELECT pm.id, pm.campaign_id FROM payment_methods pm WHERE pm.id = $1",
+    [req.params.id]
+  );
+
+  if ((paymentMethod.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Payment method not found" });
+  }
+
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), paymentMethod.rows[0].campaign_id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Payment method not found" });
+  }
+
   const result = await pool.query("DELETE FROM payment_methods WHERE id = $1 RETURNING id", [req.params.id]);
 
   if ((result.rowCount ?? 0) === 0) {

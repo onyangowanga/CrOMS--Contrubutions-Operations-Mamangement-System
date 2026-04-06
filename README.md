@@ -77,6 +77,18 @@ CrOMS (Contributions Operations Management System) implemented from the handbook
 ## Environment reference
 See backend/.env.example for all supported environment variables.
 
+## VPS repeat deploy
+For subsequent VPS deploys after the first setup:
+
+1. SSH into the server and go to `/opt/croms`
+2. Run `bash deploy/scripts/redeploy.sh`
+
+Supporting scripts:
+
+- `bash deploy/scripts/reload-nginx.sh`
+- `bash deploy/scripts/reload-nginx.sh --http-only`
+- `bash deploy/scripts/check-live.sh`
+
 ## Blueprint alignment notes
 - Matches the blueprint data model for campaigns, contributors, transactions, and payment methods.
 - Uses PostgreSQL, Docker, JWT auth, multi-group membership, regex-first parsing, and WhatsApp summary generation as specified.

@@ -1,15 +1,24 @@
 import { Request, Response } from "express";
 import { findBestContributorMatch } from "../../lib/nameMatching";
 import { pool } from "../../db/client";
+import { getAccessibleCampaign } from "../../lib/access";
 import { recordContribution } from "../../services/contributions";
 import { generateWhatsappSummary } from "../../services/summary";
+import { normalizePersonName } from "../../utils/names";
 import { parseTransactionText } from "../../utils/parser";
 
 export async function handleParsedTransaction(req: Request, res: Response): Promise<Response> {
   const { campaignId, rawText, displayName, identityType } = req.body;
+  const normalizedDisplayName = normalizePersonName(displayName);
 
   if (!campaignId || !rawText) {
     return res.status(400).json({ error: "campaignId and rawText are required" });
+  }
+
+  const authedUser = (req as any).user;
+  const accessibleCampaign = await getAccessibleCampaign(authedUser, campaignId);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
   }
 
   const campaign = await pool.query("SELECT id FROM campaigns WHERE id = $1", [campaignId]);
@@ -18,7 +27,7 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
   }
 
   try {
-    const parsed = parseTransactionText(rawText);
+    const parsed = parseTransactionText(rawText, normalizedDisplayName || displayName);
 
     const duplicate = await pool.query(
       `
@@ -82,7 +91,7 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
             parsed.timestamp,
             parsed.source,
             rawText,
-            displayName ?? parsed.senderName,
+            normalizedDisplayName || parsed.senderName,
             identityType ?? "individual",
             match.score || null,
             reviewReason,
@@ -102,7 +111,7 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
       const saved = await recordContribution(client, {
         campaignId,
         contributorId: match.contributor?.id,
-        displayName,
+        displayName: normalizedDisplayName || undefined,
         identityType,
         formalName: parsed.senderName,
         senderName: parsed.senderName,

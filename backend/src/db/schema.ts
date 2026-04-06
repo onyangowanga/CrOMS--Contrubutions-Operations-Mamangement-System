@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
   group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   target_amount NUMERIC(14, 2),
+  whatsapp_header_text TEXT,
+  whatsapp_additional_info TEXT,
   status campaign_status NOT NULL DEFAULT 'active',
   total_raised NUMERIC(14, 2) NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -123,4 +125,6 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ;
 ALTER TABLE groups ADD COLUMN IF NOT EXISTS brand_name TEXT;
 ALTER TABLE groups ADD COLUMN IF NOT EXISTS brand_color TEXT;
 ALTER TABLE groups ADD COLUMN IF NOT EXISTS brand_logo_path TEXT;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS whatsapp_header_text TEXT;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS whatsapp_additional_info TEXT;
 `;

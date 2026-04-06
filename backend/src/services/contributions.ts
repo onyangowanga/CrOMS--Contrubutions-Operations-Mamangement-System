@@ -1,4 +1,5 @@
 import { PoolClient } from "pg";
+import { coalescePersonName, normalizePersonName } from "../utils/names";
 
 interface RecordContributionInput {
   campaignId: string;
@@ -18,6 +19,9 @@ export async function recordContribution(
   client: PoolClient,
   input: RecordContributionInput
 ): Promise<{ contributor: any; transaction: any }> {
+  const normalizedDisplayName = normalizePersonName(input.displayName);
+  const normalizedFormalName = coalescePersonName(input.formalName, input.senderName) || input.senderName.trim();
+  const normalizedSenderName = coalescePersonName(input.senderName, input.formalName) || input.senderName.trim();
   let contributor;
 
   if (input.contributorId) {
@@ -28,22 +32,33 @@ export async function recordContribution(
 
     contributor = contributorResult.rows[0];
     const alternateSenders = Array.isArray(contributor.alternate_senders) ? contributor.alternate_senders : [];
-    const mergedSenders = alternateSenders.includes(input.senderName)
+    const mergedSenders = alternateSenders.includes(normalizedSenderName)
       ? alternateSenders
-      : [...alternateSenders, input.senderName];
+      : [...alternateSenders, normalizedSenderName];
+
+    const nextFormalName = coalescePersonName(contributor.formal_name, normalizedFormalName, normalizedSenderName) || normalizedSenderName;
+    const nextDisplayName = coalescePersonName(
+      normalizedDisplayName,
+      contributor.display_name,
+      contributor.formal_name,
+      normalizedFormalName,
+      normalizedSenderName
+    ) || normalizedSenderName;
 
     const updated = await client.query(
       `
       UPDATE contributors
-      SET display_name = COALESCE($2, display_name),
-          identity_type = COALESCE($3::identity_type, identity_type),
-          alternate_senders = $4::jsonb
+      SET formal_name = $2,
+          display_name = $3,
+          identity_type = COALESCE($4::identity_type, identity_type),
+          alternate_senders = $5::jsonb
       WHERE id = $1
       RETURNING *
       `,
       [
         input.contributorId,
-        input.displayName ?? null,
+        nextFormalName,
+        nextDisplayName,
         input.identityType ?? null,
         JSON.stringify(mergedSenders),
       ]
@@ -66,10 +81,10 @@ export async function recordContribution(
       `,
       [
         input.campaignId,
-        input.formalName,
-        input.displayName ?? input.senderName,
+        normalizedFormalName,
+        normalizedDisplayName || normalizedSenderName,
         input.identityType ?? "individual",
-        JSON.stringify([input.senderName]),
+        JSON.stringify([normalizedSenderName]),
       ]
     );
 
@@ -98,7 +113,7 @@ export async function recordContribution(
       input.transactionCode,
       input.rawText,
       input.source,
-      input.senderName,
+      normalizedSenderName,
       input.timestamp,
     ]
   );

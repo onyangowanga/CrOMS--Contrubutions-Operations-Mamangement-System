@@ -1,33 +1,57 @@
 import { Router } from "express";
 import { pool } from "../db/client";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { getRequestUser, requireAuth, requireRole } from "../middleware/auth";
+import { getAccessibleCampaign, hasGroupAccess, isAdminUser } from "../lib/access";
 
 const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
 
-campaignsRouter.get("/", async (_req, res) => {
-  const result = await pool.query(
-    "SELECT c.*, g.name AS group_name FROM campaigns c JOIN groups g ON g.id = c.group_id ORDER BY c.created_at DESC"
-  );
+campaignsRouter.get("/", async (req, res) => {
+  const user = getRequestUser(req);
+  const result = isAdminUser(user)
+    ? await pool.query(
+      "SELECT c.*, g.name AS group_name FROM campaigns c JOIN groups g ON g.id = c.group_id ORDER BY c.created_at DESC"
+    )
+    : await pool.query(
+      `
+      SELECT c.*, g.name AS group_name
+      FROM campaigns c
+      JOIN groups g ON g.id = c.group_id
+      JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $1
+      ORDER BY c.created_at DESC
+      `,
+      [user.id]
+    );
   res.json(result.rows);
 });
 
 campaignsRouter.post("/", requireRole("admin", "treasurer"), async (req, res) => {
-  const { name, groupId, targetAmount, status } = req.body;
+  const { name, groupId, targetAmount, status, whatsappHeaderText, whatsappAdditionalInfo } = req.body;
+  const user = getRequestUser(req);
 
   if (!name || !groupId) {
     return res.status(400).json({ error: "name and groupId are required" });
   }
 
+  const canAccessGroup = await hasGroupAccess(user, groupId);
+  if (!canAccessGroup) {
+    return res.status(404).json({ error: "Group not found" });
+  }
+
   const campaign = await pool.query(
-    "INSERT INTO campaigns (group_id, name, target_amount, status) VALUES ($1, $2, $3, $4) RETURNING *",
-    [groupId, name, targetAmount ? Number(targetAmount) : null, status ?? "active"]
+    "INSERT INTO campaigns (group_id, name, target_amount, whatsapp_header_text, whatsapp_additional_info, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+    [groupId, name, targetAmount ? Number(targetAmount) : null, whatsappHeaderText ?? null, whatsappAdditionalInfo ?? null, status ?? "active"]
   );
 
   return res.status(201).json(campaign.rows[0]);
 });
 
 campaignsRouter.patch("/:id/target", requireRole("admin", "treasurer"), async (req, res) => {
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), req.params.id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
   const targetAmount = Number(req.body.targetAmount);
 
   if (Number.isNaN(targetAmount)) {
@@ -46,6 +70,11 @@ campaignsRouter.patch("/:id/target", requireRole("admin", "treasurer"), async (r
 });
 
 campaignsRouter.patch("/:id/status", requireRole("admin", "treasurer"), async (req, res) => {
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), req.params.id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
   const { status } = req.body;
 
   if (!["active", "closed"].includes(String(status))) {
@@ -65,6 +94,11 @@ campaignsRouter.patch("/:id/status", requireRole("admin", "treasurer"), async (r
 });
 
 campaignsRouter.post("/:id/payment-methods", requireRole("admin", "treasurer"), async (req, res) => {
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), req.params.id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
   const { methodType, value, label } = req.body;
 
   if (!methodType || !value || !label) {
@@ -85,6 +119,11 @@ campaignsRouter.post("/:id/payment-methods", requireRole("admin", "treasurer"), 
 });
 
 campaignsRouter.get("/:id/summary", async (req, res) => {
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), req.params.id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
   const campaign = await pool.query("SELECT * FROM campaigns WHERE id = $1", [req.params.id]);
   if ((campaign.rowCount ?? 0) === 0) {
     return res.status(404).json({ error: "Campaign not found" });

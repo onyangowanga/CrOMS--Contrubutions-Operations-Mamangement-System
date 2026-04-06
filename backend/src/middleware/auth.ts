@@ -12,6 +12,10 @@ export interface AuthedRequest extends Request {
   user: RequestUser;
 }
 
+export function getRequestUser(req: Request): RequestUser {
+  return (req as unknown as AuthedRequest).user;
+}
+
 export function requireAuth(req: Request, res: Response, next: NextFunction): Response | void {
   const authHeader = req.header("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {

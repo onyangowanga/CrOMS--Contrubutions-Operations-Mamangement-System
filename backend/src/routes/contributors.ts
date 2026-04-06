@@ -1,11 +1,17 @@
 import { Router } from "express";
 import { pool } from "../db/client";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { getRequestUser, requireAuth, requireRole } from "../middleware/auth";
+import { getAccessibleCampaign } from "../lib/access";
 
 const contributorsRouter = Router();
 contributorsRouter.use(requireAuth);
 
 contributorsRouter.get("/:campaignId", async (req, res) => {
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), req.params.campaignId);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
   const result = await pool.query(
     "SELECT * FROM contributors WHERE campaign_id = $1 ORDER BY total_contributed DESC",
     [req.params.campaignId]
@@ -22,10 +28,15 @@ contributorsRouter.post("/:id/add-sender", requireRole("admin", "treasurer"), as
   }
 
   const contributorResult = await pool.query(
-    "SELECT id, alternate_senders FROM contributors WHERE id = $1",
+    "SELECT c.id, c.alternate_senders, c.campaign_id FROM contributors c WHERE c.id = $1",
     [req.params.id]
   );
   if ((contributorResult.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Contributor not found" });
+  }
+
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), contributorResult.rows[0].campaign_id);
+  if (!accessibleCampaign) {
     return res.status(404).json({ error: "Contributor not found" });
   }
 

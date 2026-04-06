@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { pool } from "../db/client";
-import { requireAuth, requireRole, AuthedRequest } from "../middleware/auth";
+import { getRequestUser, requireAuth, requireRole } from "../middleware/auth";
+import { getAccessibleCampaign, isAdminUser } from "../lib/access";
 import { recordContribution } from "../services/contributions";
 import { generateWhatsappSummary } from "../services/summary";
+import { coalescePersonName } from "../utils/names";
 
 const confirmationsRouter = Router();
 confirmationsRouter.use(requireAuth);
@@ -10,14 +12,28 @@ confirmationsRouter.use(requireAuth);
 confirmationsRouter.get("/", async (req, res) => {
   const status = String(req.query.status ?? "pending");
   const campaignId = req.query.campaignId ? String(req.query.campaignId) : null;
+  const user = getRequestUser(req);
+
+  if (campaignId) {
+    const accessibleCampaign = await getAccessibleCampaign(user, campaignId);
+    if (!accessibleCampaign) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+  }
 
   const values: unknown[] = [status];
   let query = `
     SELECT cq.*, c.display_name AS suggested_display_name, c.identity_type AS suggested_identity_type
     FROM confirmation_queue cq
     LEFT JOIN contributors c ON c.id = cq.suggested_contributor_id
+    JOIN campaigns campaign_access ON campaign_access.id = cq.campaign_id
     WHERE cq.status = $1::confirmation_status
   `;
+
+  if (!isAdminUser(user)) {
+    values.push(user.id);
+    query += ` AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = campaign_access.group_id AND gm.user_id = $${values.length})`;
+  }
 
   if (campaignId) {
     values.push(campaignId);
@@ -31,7 +47,7 @@ confirmationsRouter.get("/", async (req, res) => {
 
 confirmationsRouter.post("/:id/approve", requireRole("admin", "treasurer"), async (req, res) => {
   const { contributorId, displayName, identityType } = req.body;
-  const user = (req as AuthedRequest).user;
+  const user = getRequestUser(req);
   const client = await pool.connect();
 
   try {
@@ -48,6 +64,12 @@ confirmationsRouter.post("/:id/approve", requireRole("admin", "treasurer"), asyn
     }
 
     const item = queueResult.rows[0];
+    const accessibleCampaign = await getAccessibleCampaign(user, item.campaign_id, client);
+    if (!accessibleCampaign) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Pending confirmation not found" });
+    }
+
     const duplicate = await client.query(
       "SELECT id FROM transactions WHERE transaction_code = $1",
       [item.parsed_transaction_code]
@@ -59,7 +81,7 @@ confirmationsRouter.post("/:id/approve", requireRole("admin", "treasurer"), asyn
     }
 
     const finalContributorId = contributorId || item.suggested_contributor_id || undefined;
-    const finalDisplayName = displayName || item.proposed_display_name || item.parsed_sender_name;
+    const finalDisplayName = coalescePersonName(displayName, item.proposed_display_name, item.parsed_sender_name) || item.parsed_sender_name;
     const finalIdentityType = identityType || item.proposed_identity_type || "individual";
 
     const saved = await recordContribution(client, {
@@ -111,7 +133,17 @@ confirmationsRouter.post("/:id/approve", requireRole("admin", "treasurer"), asyn
 
 confirmationsRouter.post("/:id/reject", requireRole("admin", "treasurer"), async (req, res) => {
   const { reason } = req.body;
-  const user = (req as AuthedRequest).user;
+  const user = getRequestUser(req);
+  const existing = await pool.query("SELECT campaign_id FROM confirmation_queue WHERE id = $1 AND status = 'pending'", [req.params.id]);
+  if ((existing.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Pending confirmation not found" });
+  }
+
+  const accessibleCampaign = await getAccessibleCampaign(user, existing.rows[0].campaign_id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Pending confirmation not found" });
+  }
+
   const updated = await pool.query(
     `
     UPDATE confirmation_queue

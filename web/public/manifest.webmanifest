@@ -1,0 +1,21 @@
+{
+  "name": "CrOMS Web Operations Console",
+  "short_name": "CrOMS",
+  "description": "Contributions and fundraising operations console for groups, campaigns, parsing, summaries, and reporting.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f1e7",
+  "theme_color": "#b84c1b",
+  "icons": [
+    {
+      "src": "/assets/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

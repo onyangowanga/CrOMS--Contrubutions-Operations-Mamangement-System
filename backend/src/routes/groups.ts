@@ -1,20 +1,33 @@
 import { Router } from "express";
 import { pool } from "../db/client";
-import { AuthedRequest, requireAuth, requireRole } from "../middleware/auth";
+import { getRequestUser, requireAuth, requireRole } from "../middleware/auth";
+import { hasGroupAccess, isAdminUser } from "../lib/access";
 
 const groupsRouter = Router();
 groupsRouter.use(requireAuth);
 
-groupsRouter.get("/", async (_req, res) => {
-  const result = await pool.query(
-    "SELECT g.*, u.full_name AS creator_name FROM groups g JOIN users u ON u.id = g.created_by ORDER BY g.created_at DESC"
-  );
+groupsRouter.get("/", async (req, res) => {
+  const user = getRequestUser(req);
+  const result = isAdminUser(user)
+    ? await pool.query(
+      "SELECT g.*, u.full_name AS creator_name FROM groups g JOIN users u ON u.id = g.created_by ORDER BY g.created_at DESC"
+    )
+    : await pool.query(
+      `
+      SELECT g.*, u.full_name AS creator_name
+      FROM groups g
+      JOIN users u ON u.id = g.created_by
+      JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = $1
+      ORDER BY g.created_at DESC
+      `,
+      [user.id]
+    );
   return res.json(result.rows);
 });
 
-groupsRouter.post("/", requireRole("admin", "treasurer"), async (req, res) => {
+groupsRouter.post("/", requireRole("admin"), async (req, res) => {
   const { name, description, brandName, brandColor, brandLogoPath } = req.body;
-  const user = (req as AuthedRequest).user;
+  const user = getRequestUser(req);
 
   if (!name) {
     return res.status(400).json({ error: "name is required" });
@@ -37,7 +50,7 @@ groupsRouter.post("/", requireRole("admin", "treasurer"), async (req, res) => {
   return res.status(201).json(created.rows[0]);
 });
 
-groupsRouter.patch("/:groupId", requireRole("admin", "treasurer"), async (req, res) => {
+groupsRouter.patch("/:groupId", requireRole("admin"), async (req, res) => {
   const { name, description, brandName, brandColor, brandLogoPath } = req.body;
   const updated = await pool.query(
     `
@@ -60,7 +73,7 @@ groupsRouter.patch("/:groupId", requireRole("admin", "treasurer"), async (req, r
   return res.json(updated.rows[0]);
 });
 
-groupsRouter.delete("/:groupId", requireRole("admin", "treasurer"), async (req, res) => {
+groupsRouter.delete("/:groupId", requireRole("admin"), async (req, res) => {
   const deleted = await pool.query("DELETE FROM groups WHERE id = $1 RETURNING id", [req.params.groupId]);
   if ((deleted.rowCount ?? 0) === 0) {
     return res.status(404).json({ error: "Group not found" });
@@ -69,7 +82,7 @@ groupsRouter.delete("/:groupId", requireRole("admin", "treasurer"), async (req, 
   return res.json({ deleted: true, id: req.params.groupId });
 });
 
-groupsRouter.post("/:groupId/members", requireRole("admin", "treasurer"), async (req, res) => {
+groupsRouter.post("/:groupId/members", requireRole("admin"), async (req, res) => {
   const { userId, role } = req.body;
   if (!userId || !role) {
     return res.status(400).json({ error: "userId and role are required" });
@@ -83,7 +96,12 @@ groupsRouter.post("/:groupId/members", requireRole("admin", "treasurer"), async 
   return res.status(201).json(inserted.rows[0]);
 });
 
-groupsRouter.get("/:groupId/members", async (req, res) => {
+groupsRouter.get("/:groupId/members", requireRole("admin"), async (req, res) => {
+  const canAccess = await hasGroupAccess(getRequestUser(req), req.params.groupId);
+  if (!canAccess) {
+    return res.status(404).json({ error: "Group not found" });
+  }
+
   const result = await pool.query(
     "SELECT gm.*, u.full_name, u.email FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = $1 ORDER BY gm.created_at DESC",
     [req.params.groupId]
@@ -91,7 +109,7 @@ groupsRouter.get("/:groupId/members", async (req, res) => {
   return res.json(result.rows);
 });
 
-groupsRouter.delete("/:groupId/members/:userId", requireRole("admin", "treasurer"), async (req, res) => {
+groupsRouter.delete("/:groupId/members/:userId", requireRole("admin"), async (req, res) => {
   const deleted = await pool.query(
     "DELETE FROM group_members WHERE group_id = $1 AND user_id = $2 RETURNING id",
     [req.params.groupId, req.params.userId]
