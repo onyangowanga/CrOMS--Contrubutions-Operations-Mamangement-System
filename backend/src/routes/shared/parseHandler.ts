@@ -2,13 +2,27 @@ import { Request, Response } from "express";
 import { findBestContributorMatch } from "../../lib/nameMatching";
 import { pool } from "../../db/client";
 import { getAccessibleCampaign } from "../../lib/access";
-import { recordContribution } from "../../services/contributions";
+import { postAllocatedContribution, previewContributionAllocations } from "../../services/payments";
 import { generateWhatsappSummary } from "../../services/summary";
 import { normalizePersonName } from "../../utils/names";
 import { parseTransactionText } from "../../utils/parser";
 
+function firstScalar(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    const first = value.find((entry) => typeof entry === "string" && entry.trim());
+    return typeof first === "string" ? first.trim() : undefined;
+  }
+
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 export async function handleParsedTransaction(req: Request, res: Response): Promise<Response> {
-  const { campaignId, rawText, displayName, identityType } = req.body;
+  const campaignId = firstScalar(req.body.campaignId);
+  const priorityCampaignId = firstScalar(req.body.priorityCampaignId);
+  const rawText = firstScalar(req.body.rawText);
+  const displayName = firstScalar(req.body.displayName);
+  const identityType = firstScalar(req.body.identityType);
+  const allocations = Array.isArray(req.body.allocations) ? req.body.allocations : undefined;
   const normalizedDisplayName = normalizePersonName(displayName);
 
   if (!campaignId || !rawText) {
@@ -19,6 +33,13 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
   const accessibleCampaign = await getAccessibleCampaign(authedUser, campaignId);
   if (!accessibleCampaign) {
     return res.status(404).json({ error: "Campaign not found" });
+  }
+
+  if (priorityCampaignId) {
+    const accessiblePriorityCampaign = await getAccessibleCampaign(authedUser, priorityCampaignId);
+    if (!accessiblePriorityCampaign) {
+      return res.status(404).json({ error: "Priority campaign not found" });
+    }
   }
 
   const campaign = await pool.query("SELECT id FROM campaigns WHERE id = $1", [campaignId]);
@@ -55,9 +76,21 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
         [campaignId]
       );
 
-      const match = findBestContributorMatch(parsed.senderName, contributors.rows as Array<any>);
+      const matchingName = normalizedDisplayName || parsed.senderName;
+      const match = findBestContributorMatch(matchingName, contributors.rows as Array<any>);
+      const allocationPreview = await previewContributionAllocations({
+        campaignId,
+        priorityCampaignId,
+        contributorId: match.contributor?.id,
+        displayName: matchingName,
+        identityType,
+        totalAmount: parsed.amount,
+      }, client);
+      const finalAllocations = Array.isArray(allocations) && allocations.length > 0 ? allocations : allocationPreview.allocations
+        .filter((item) => Number(item.suggestedAmount) > 0)
+        .map((item) => ({ campaignId: item.campaignId, amount: Number(item.suggestedAmount) }));
 
-      if (!match.exact) {
+      if (!match.exact && !normalizedDisplayName) {
         const reviewReason = match.contributor
           ? "Potential contributor match found. Treasurer confirmation required."
           : "No exact contributor match found. Treasurer confirmation required.";
@@ -75,11 +108,12 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
             raw_text,
             proposed_display_name,
             proposed_identity_type,
+            allocation_plan,
             match_score,
             review_reason,
             status
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7::source_type, $8, $9, $10::identity_type, $11, $12, 'pending')
+          VALUES ($1, $2, $3, $4, $5, $6, $7::source_type, $8, $9, $10::identity_type, $11::jsonb, $12, $13, 'pending')
           RETURNING *
           `,
           [
@@ -93,6 +127,10 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
             rawText,
             normalizedDisplayName || parsed.senderName,
             identityType ?? "individual",
+            JSON.stringify({
+              priorityCampaignId: priorityCampaignId || campaignId,
+              allocations: finalAllocations,
+            }),
             match.score || null,
             reviewReason,
           ]
@@ -108,18 +146,21 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
         });
       }
 
-      const saved = await recordContribution(client, {
+      const saved = await postAllocatedContribution(client, {
         campaignId,
-        contributorId: match.contributor?.id,
+        priorityCampaignId: priorityCampaignId || undefined,
+        contributorId: match.exact ? match.contributor?.id : undefined,
         displayName: normalizedDisplayName || undefined,
         identityType,
-        formalName: parsed.senderName,
-        senderName: parsed.senderName,
-        amount: parsed.amount,
-        transactionCode: parsed.transactionCode,
+        formalName: normalizedDisplayName || parsed.senderName,
+        senderName: normalizedDisplayName || parsed.senderName,
+        totalAmount: parsed.amount,
+        allocations: finalAllocations,
+        referenceCode: parsed.transactionCode,
         rawText,
         source: parsed.source,
         timestamp: parsed.timestamp,
+        createdBy: authedUser?.id,
       });
 
       await client.query("COMMIT");
@@ -129,6 +170,9 @@ export async function handleParsedTransaction(req: Request, res: Response): Prom
       return res.status(201).json({
         status: "saved",
         parsed,
+        payment: saved.payment,
+        memberProfile: saved.memberProfile,
+        allocations: saved.transactions,
         contributor: saved.contributor,
         transaction: saved.transaction,
         whatsappSummary,

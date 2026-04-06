@@ -4,7 +4,7 @@ import { Router } from "express";
 import { pool } from "../db/client";
 import { getRequestUser, requireAuth, requireRole } from "../middleware/auth";
 import { getAccessibleCampaign } from "../lib/access";
-import { recordContribution } from "../services/contributions";
+import { postAllocatedContribution, previewContributionAllocations } from "../services/payments";
 import { generateWhatsappSummary } from "../services/summary";
 import { coalescePersonName, normalizePersonName } from "../utils/names";
 import { handleParsedTransaction } from "./shared/parseHandler";
@@ -12,12 +12,8 @@ import { handleParsedTransaction } from "./shared/parseHandler";
 const transactionsRouter = Router();
 transactionsRouter.use(requireAuth);
 
-transactionsRouter.post("/parse", requireRole("admin", "treasurer"), async (req, res) => {
-  return handleParsedTransaction(req, res);
-});
-
-transactionsRouter.post("/manual", requireRole("admin", "treasurer"), async (req, res) => {
-  const { campaignId, contributorId, displayName, identityType, amount, referenceCode, note, eventTime } = req.body;
+transactionsRouter.post("/preview-allocation", requireRole("admin", "treasurer"), async (req, res) => {
+  const { campaignId, priorityCampaignId, contributorId, displayName, identityType, amount } = req.body;
   const user = getRequestUser(req);
 
   if (!campaignId || amount === undefined || amount === null || amount === "") {
@@ -27,6 +23,58 @@ transactionsRouter.post("/manual", requireRole("admin", "treasurer"), async (req
   const accessibleCampaign = await getAccessibleCampaign(user, campaignId);
   if (!accessibleCampaign) {
     return res.status(404).json({ error: "Campaign not found" });
+  }
+
+  if (priorityCampaignId) {
+    const accessiblePriorityCampaign = await getAccessibleCampaign(user, priorityCampaignId);
+    if (!accessiblePriorityCampaign) {
+      return res.status(404).json({ error: "Priority campaign not found" });
+    }
+  }
+
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ error: "amount must be a positive number" });
+  }
+
+  try {
+    const preview = await previewContributionAllocations({
+      campaignId,
+      priorityCampaignId,
+      contributorId: contributorId || undefined,
+      displayName,
+      identityType,
+      totalAmount: numericAmount,
+    });
+    return res.json(preview);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to preview allocation";
+    return res.status(422).json({ error: message });
+  }
+});
+
+transactionsRouter.post("/parse", requireRole("admin", "treasurer"), async (req, res) => {
+  return handleParsedTransaction(req, res);
+});
+
+transactionsRouter.post("/manual", requireRole("admin", "treasurer"), async (req, res) => {
+  const { campaignId, priorityCampaignId, contributorId, displayName, identityType, amount, allocations, referenceCode, note, eventTime } = req.body;
+  const user = getRequestUser(req);
+
+  if (!campaignId || amount === undefined || amount === null || amount === "") {
+    return res.status(400).json({ error: "campaignId and amount are required" });
+  }
+
+  const accessibleCampaign = await getAccessibleCampaign(user, campaignId);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
+  if (priorityCampaignId) {
+    const accessiblePriorityCampaign = await getAccessibleCampaign(user, priorityCampaignId);
+    if (!accessiblePriorityCampaign) {
+      return res.status(404).json({ error: "Priority campaign not found" });
+    }
   }
 
   const numericAmount = Number(amount);
@@ -59,18 +107,21 @@ transactionsRouter.post("/manual", requireRole("admin", "treasurer"), async (req
     await client.query("BEGIN");
 
     const contributorName = coalescePersonName(normalizedDisplayName, displayName) || "Cash Contributor";
-    const saved = await recordContribution(client, {
+    const saved = await postAllocatedContribution(client, {
       campaignId,
+      priorityCampaignId: priorityCampaignId || undefined,
       contributorId: contributorId || undefined,
       displayName: normalizedDisplayName || undefined,
       identityType,
       formalName: contributorName,
       senderName: contributorName,
-      amount: numericAmount,
-      transactionCode,
+      totalAmount: numericAmount,
+      allocations,
+      referenceCode: transactionCode,
       rawText: typeof note === "string" && note.trim() ? `Manual cash contribution: ${note.trim()}` : "Manual cash contribution",
       source: "manual",
       timestamp: typeof eventTime === "string" && eventTime.trim() ? eventTime.trim() : new Date().toISOString(),
+      createdBy: user.id,
     });
 
     await client.query("COMMIT");
@@ -79,6 +130,9 @@ transactionsRouter.post("/manual", requireRole("admin", "treasurer"), async (req
 
     return res.status(201).json({
       status: "saved",
+      payment: saved.payment,
+      memberProfile: saved.memberProfile,
+      allocations: saved.transactions,
       contributor: saved.contributor,
       transaction: saved.transaction,
       whatsappSummary,
@@ -99,7 +153,13 @@ transactionsRouter.get("/:campaignId", async (req, res) => {
   }
 
   const result = await pool.query(
-    "SELECT * FROM transactions WHERE campaign_id = $1 ORDER BY created_at DESC",
+    `
+    SELECT t.*, p.reference_code AS payment_reference_code, p.total_amount AS payment_total_amount
+    FROM transactions t
+    LEFT JOIN payments p ON p.id = t.payment_id
+    WHERE t.campaign_id = $1
+    ORDER BY t.created_at DESC
+    `,
     [req.params.campaignId]
   );
   return res.json(result.rows);

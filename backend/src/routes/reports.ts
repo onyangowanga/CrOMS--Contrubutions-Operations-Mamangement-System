@@ -185,6 +185,7 @@ async function getCampaignStatement(campaignId: string): Promise<StatementData |
     `
     SELECT
       t.transaction_code,
+      p.reference_code AS payment_reference_code,
       t.event_time,
       t.message_raw,
       t.source,
@@ -193,6 +194,7 @@ async function getCampaignStatement(campaignId: string): Promise<StatementData |
       c.display_name,
       c.formal_name
     FROM transactions t
+    LEFT JOIN payments p ON p.id = t.payment_id
     LEFT JOIN contributors c ON c.id = t.contributor_id
     WHERE t.campaign_id = $1
     ORDER BY t.created_at DESC
@@ -202,7 +204,7 @@ async function getCampaignStatement(campaignId: string): Promise<StatementData |
 
   const statementRows = result.rows.map((row) => ({
     contributorName: coalescePersonName(row.display_name, row.formal_name, row.sender_name) || "Contributor",
-    referenceCode: row.transaction_code,
+    referenceCode: row.payment_reference_code || row.transaction_code,
     paymentDate: row.event_time,
     paymentMode: formatSource(row.source),
     amount: Number(row.amount || 0),

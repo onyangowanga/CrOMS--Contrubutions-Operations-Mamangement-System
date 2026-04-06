@@ -1,11 +1,12 @@
 import { useState } from "react";
+import SelectField from "../components/forms/SelectField";
 import TextField from "../components/forms/TextField";
-import ContributorCard from "../components/cards/ContributorCard";
 import Panel from "../components/panels/Panel";
+import { formatPersonName } from "../context/AppContext";
 import { formatCurrency, groupTransactionsByDay, useAppContext } from "../context/AppContext";
 
 export default function ReportsPage() {
-  const { selectedCampaign, contributors, transactions, user, downloadContributorsCsv, downloadStatementExcel, downloadStatementPdf, deleteTransaction, showNotice, clearNotice, getErrorMessage } = useAppContext();
+  const { campaigns, selectedCampaign, selectedCampaignId, setSelectedCampaignId, contributors, transactions, user, downloadContributorsCsv, downloadStatementExcel, downloadStatementPdf, deleteTransaction, showNotice, clearNotice, getErrorMessage } = useAppContext();
   const [deleteModal, setDeleteModal] = useState({ transaction: null, password: "" });
   const dailyTotals = groupTransactionsByDay(transactions);
   const transactionCount = transactions.length;
@@ -37,11 +38,25 @@ export default function ReportsPage() {
             showNotice({ tone: "error", title: "PDF export failed", message: getErrorMessage(error, "Unable to export the PDF statement.") });
           }
         }}><span className="button-icon" aria-hidden="true">↓</span><span>PDF</span></button></div>}>
+          <div className="compact-row">
+            <SelectField label="Campaign Report" value={selectedCampaignId} helperText="Choose which campaign report you want to review or download." options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))} onChange={setSelectedCampaignId} />
+          </div>
           <p className="stats-note">
             {selectedCampaign ? `${selectedCampaign.name} has ${contributors.length} contributor records and ${transactionCount} transactions totaling KES ${formatCurrency(totalAmount)}.` : "Select a campaign from the campaigns page to focus reporting."}
           </p>
-          <div className="stack-list small-cards">
-            {contributors.map((contributor) => <ContributorCard key={contributor.id} contributor={contributor} />)}
+          <div className="list-table contributor-table">
+            <div className="list-row table-head contributor-row">
+              <strong>Contributor</strong>
+              <span>Identity</span>
+              <span>Total</span>
+            </div>
+            {contributors.map((contributor) => (
+              <div className="list-row contributor-row" key={contributor.id}>
+                <strong>{formatPersonName(contributor.display_name, contributor.formal_name, "Contributor")}</strong>
+                <span>{contributor.identity_type || "individual"}</span>
+                <span>KES {formatCurrency(contributor.total_contributed)}</span>
+              </div>
+            ))}
           </div>
         </Panel>
 

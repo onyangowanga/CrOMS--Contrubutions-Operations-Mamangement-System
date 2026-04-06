@@ -5,6 +5,41 @@ import TextField from "../components/forms/TextField";
 import ThemeToggle from "../components/ui/ThemeToggle";
 import { formatPersonName, useAppContext } from "../context/AppContext";
 
+const helpSections = [
+  {
+    title: "Log Payments",
+    items: [
+      "Use the M-Pesa tab for pasted messages and the Cash tab for manually received money.",
+      "If a message does not include the contributor name, enter a display name before posting.",
+      "Use Preview Allocation only when one payment should be split across multiple campaigns.",
+    ],
+  },
+  {
+    title: "Campaign Setup",
+    items: [
+      "Create campaigns from the Create Campaign tab.",
+      "Use the Edit Campaign tab to update the campaign name, target, suggested contribution, and saved WhatsApp text.",
+      "Set paybill methods with the correct account number or account name for each campaign.",
+    ],
+  },
+  {
+    title: "Reviews And Reports",
+    items: [
+      "Pending Reviews lets you approve or reject unclear parsed transactions.",
+      "If you close a freshly opened review popup without approving, that queued item is discarded.",
+      "Use the Reports page campaign selector before exporting CSV, Excel, or PDF statements.",
+    ],
+  },
+  {
+    title: "WhatsApp Summary",
+    items: [
+      "Refresh to load the latest campaign summary.",
+      "Copy Summary sends the text to your clipboard.",
+      "Open WhatsApp launches WhatsApp Web or the WhatsApp app with the summary text prefilled.",
+    ],
+  },
+];
+
 export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -24,6 +59,7 @@ export default function AppShell() {
     getErrorMessage,
   } = useAppContext();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [helpModalOpen, setHelpModalOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const activeGroupName = selectedCampaign?.group_name || selectedCampaign?.name || "Contribution Group";
@@ -120,6 +156,9 @@ export default function AppShell() {
             <span>{user ? user.role : "Not signed in"}</span>
           </div>
           <div className="hero-actions hero-actions-account desktop-actions">
+            <button className="ghost-button help-trigger" type="button" aria-label="Open help" title="Help" onClick={() => setHelpModalOpen(true)}>
+              ?
+            </button>
             <ThemeToggle />
             <div className="account-menu-wrap desktop-account-wrap">
               <button className="ghost-button account-menu-trigger" type="button" onClick={() => setAccountMenuOpen((current) => !current)}>
@@ -129,6 +168,9 @@ export default function AppShell() {
             </div>
           </div>
           <div className="mobile-menu-wrap account-menu-wrap">
+            <button className="ghost-button help-trigger mobile-help-trigger" type="button" aria-label="Open help" title="Help" onClick={() => setHelpModalOpen(true)}>
+              ?
+            </button>
             <button className="ghost-button mobile-menu-trigger" type="button" onClick={() => setAccountMenuOpen((current) => !current)} aria-label="Open menu" aria-expanded={accountMenuOpen}>
               <span />
               <span />
@@ -178,6 +220,37 @@ export default function AppShell() {
         onConfirm={() => resolveConfirmation(true)}
         onCancel={() => resolveConfirmation(false)}
       />
+
+      {helpModalOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-card modal-card-wide help-modal" role="dialog" aria-modal="true" aria-labelledby="help-manual-title">
+            <p className="modal-eyebrow">Help</p>
+            <div className="list-card-top">
+              <div>
+                <h2 id="help-manual-title">Treasurer Quick Guide</h2>
+                <p className="modal-message">This help stays in a popup so the current task remains open underneath. Close it any time and continue where you left off.</p>
+              </div>
+              <button className="ghost-button" type="button" onClick={() => setHelpModalOpen(false)}>Close</button>
+            </div>
+            <div className="help-modal-body">
+              {helpSections.map((section) => (
+                <section className="help-section" key={section.title}>
+                  <h3>{section.title}</h3>
+                  <div className="help-list">
+                    {section.items.map((item) => <p key={item}>{item}</p>)}
+                  </div>
+                </section>
+              ))}
+            </div>
+            <div className="modal-actions help-modal-actions">
+              <a className="ghost-button manual-download-link" href="/manuals/CrOMS_Treasurer_User_Manual_Formatted.pdf" target="_blank" rel="noreferrer" download>
+                Download Manual PDF
+              </a>
+              <button className="primary-button" type="button" onClick={() => setHelpModalOpen(false)}>Return To Work</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {passwordModalOpen ? (
         <div className="modal-backdrop" role="presentation">

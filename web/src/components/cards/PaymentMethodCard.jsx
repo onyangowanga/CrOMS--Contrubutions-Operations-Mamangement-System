@@ -6,6 +6,7 @@ export default function PaymentMethodCard({ method }) {
         <span className="badge neutral">{method.label}</span>
       </div>
       <p>{method.value}</p>
+      {method.account_reference ? <small>Account: {method.account_reference}</small> : null}
     </article>
   );
 }

@@ -432,15 +432,32 @@ button {
   line-height: 1.45;
 }
 
+.field-help {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .primary-button,
 .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 50px;
   padding: 0 18px;
+  width: auto;
+  max-width: 100%;
   border-radius: 18px;
   border: 0;
   font-weight: 800;
   letter-spacing: -0.01em;
   transition: transform 160ms ease, opacity 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.button-inline {
+  min-width: 0;
+  width: fit-content;
 }
 
 .primary-button:hover,
@@ -454,11 +471,30 @@ button {
   box-shadow: 0 12px 24px rgba(141, 47, 11, 0.22);
 }
 
+.whatsapp-button {
+  color: #f4fff7;
+  background: linear-gradient(135deg, #1faa59, #148847);
+  box-shadow: 0 12px 24px rgba(20, 136, 71, 0.22);
+}
+
 .ghost-button {
   color: var(--ink);
   background: color-mix(in srgb, var(--panel-strong) 88%, white 12%);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-soft);
+}
+
+.help-trigger {
+  min-width: 50px;
+  width: 50px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.mobile-help-trigger {
+  margin-bottom: 10px;
 }
 
 .theme-toggle {
@@ -530,6 +566,10 @@ button {
   max-height: 280px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.allocation-list {
+  max-height: 320px;
 }
 
 .list-card {
@@ -617,6 +657,78 @@ button {
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.form-actions-inline {
+  display: flex;
+  align-items: end;
+  justify-content: flex-start;
+}
+
+.campaign-editor-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-strong) 92%, white 8%);
+}
+
+.campaign-editor-meta small {
+  color: var(--muted);
+}
+
+.allocation-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-strong) 94%, white 6%), color-mix(in srgb, var(--panel) 90%, var(--paper) 10%));
+}
+
+.allocation-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.allocation-panel-head strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.allocation-panel-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.allocation-balance {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--sky);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.allocation-grid {
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.allocation-card {
+  padding: 14px;
+}
+
+.allocation-card .metric-row {
+  font-size: 0.82rem;
 }
 
 .compact-row {
@@ -877,6 +989,48 @@ button {
   width: min(860px, 100%);
 }
 
+.help-modal {
+  max-height: min(88vh, 920px);
+  overflow: auto;
+}
+
+.help-modal-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.help-section {
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-strong) 92%, white 8%);
+}
+
+.help-section h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.help-list {
+  display: grid;
+  gap: 8px;
+}
+
+.help-list p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.manual-download-link {
+  text-decoration: none;
+}
+
+.help-modal-actions {
+  margin-top: 18px;
+}
+
 .modal-eyebrow {
   margin: 0 0 10px;
   text-transform: uppercase;
@@ -1072,6 +1226,11 @@ button {
 
 .report-transaction-row {
   grid-template-columns: 1.2fr 1fr 0.7fr 0.7fr;
+  align-items: center;
+}
+
+.contributor-row {
+  grid-template-columns: 1.2fr 0.8fr 0.7fr;
   align-items: center;
 }
 
@@ -1433,6 +1592,11 @@ button {
     width: auto;
   }
 
+  .form-actions-inline,
+  .form-actions-inline > * {
+    width: 100%;
+  }
+
   .modal-actions,
   .confirmation-detail {
     display: grid;
@@ -1498,6 +1662,16 @@ button {
     min-height: 48px;
     padding: 0 10px;
     font-size: 0.9rem;
+  }
+
+  .allocation-panel-head,
+  .campaign-editor-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .allocation-grid {
+    grid-template-columns: 1fr;
   }
 
   .route-link {

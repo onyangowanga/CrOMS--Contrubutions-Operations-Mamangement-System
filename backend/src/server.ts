@@ -24,8 +24,10 @@ app.use(express.json());
 const webDistRoot = path.resolve(__dirname, "../../web/dist");
 const webRoot = fs.existsSync(webDistRoot) ? webDistRoot : path.resolve(__dirname, "../../web");
 const faviconRoot = path.resolve(__dirname, "../../favicon_io");
+const docsRoot = path.resolve(__dirname, "../../docs");
 
 app.use("/assets", express.static(faviconRoot));
+app.use("/manuals", express.static(docsRoot));
 app.use(express.static(webRoot));
 
 app.get("/api/health", (_req, res) => {

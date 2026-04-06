@@ -20,10 +20,14 @@ paymentMethodsRouter.get("/campaign/:campaignId", async (req, res) => {
 });
 
 paymentMethodsRouter.post("/", requireRole("admin", "treasurer"), async (req, res) => {
-  const { campaignId, methodType, value, label } = req.body;
+  const { campaignId, methodType, value, label, accountReference } = req.body;
 
   if (!campaignId || !methodType || !value || !label) {
     return res.status(400).json({ error: "campaignId, methodType, value, and label are required" });
+  }
+
+  if (methodType === "paybill" && !(typeof accountReference === "string" && accountReference.trim())) {
+    return res.status(400).json({ error: "accountReference is required for paybill methods" });
   }
 
   const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), campaignId);
@@ -32,15 +36,15 @@ paymentMethodsRouter.post("/", requireRole("admin", "treasurer"), async (req, re
   }
 
   const result = await pool.query(
-    "INSERT INTO payment_methods (campaign_id, method_type, value, label) VALUES ($1, $2::payment_method_type, $3, $4) RETURNING *",
-    [campaignId, methodType, value, label]
+    "INSERT INTO payment_methods (campaign_id, method_type, value, account_reference, label) VALUES ($1, $2::payment_method_type, $3, $4, $5) RETURNING *",
+    [campaignId, methodType, value, accountReference ?? null, label]
   );
 
   return res.status(201).json(result.rows[0]);
 });
 
 paymentMethodsRouter.patch("/:id", requireRole("admin", "treasurer"), async (req, res) => {
-  const { methodType, value, label } = req.body;
+  const { methodType, value, label, accountReference } = req.body;
   const paymentMethod = await pool.query(
     "SELECT pm.id, pm.campaign_id FROM payment_methods pm WHERE pm.id = $1",
     [req.params.id]
@@ -60,11 +64,12 @@ paymentMethodsRouter.patch("/:id", requireRole("admin", "treasurer"), async (req
     UPDATE payment_methods
     SET method_type = COALESCE($2::payment_method_type, method_type),
         value = COALESCE($3, value),
-        label = COALESCE($4, label)
+        account_reference = COALESCE($4, account_reference),
+        label = COALESCE($5, label)
     WHERE id = $1
     RETURNING *
     `,
-    [req.params.id, methodType ?? null, value ?? null, label ?? null]
+    [req.params.id, methodType ?? null, value ?? null, accountReference ?? null, label ?? null]
   );
 
   if ((result.rowCount ?? 0) === 0) {

@@ -27,6 +27,7 @@ campaignsRouter.get("/", async (req, res) => {
 
 campaignsRouter.post("/", requireRole("admin", "treasurer"), async (req, res) => {
   const { name, groupId, targetAmount, status, whatsappHeaderText, whatsappAdditionalInfo } = req.body;
+  const { fixedContributionAmount } = req.body;
   const user = getRequestUser(req);
 
   if (!name || !groupId) {
@@ -39,11 +40,81 @@ campaignsRouter.post("/", requireRole("admin", "treasurer"), async (req, res) =>
   }
 
   const campaign = await pool.query(
-    "INSERT INTO campaigns (group_id, name, target_amount, whatsapp_header_text, whatsapp_additional_info, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
-    [groupId, name, targetAmount ? Number(targetAmount) : null, whatsappHeaderText ?? null, whatsappAdditionalInfo ?? null, status ?? "active"]
+     "INSERT INTO campaigns (group_id, name, target_amount, fixed_contribution_amount, whatsapp_header_text, whatsapp_additional_info, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+    [
+      groupId,
+      name,
+      targetAmount ? Number(targetAmount) : null,
+      fixedContributionAmount === undefined || fixedContributionAmount === null || fixedContributionAmount === "" ? null : Number(fixedContributionAmount),
+      whatsappHeaderText ?? null,
+      whatsappAdditionalInfo ?? null,
+      status ?? "active",
+    ]
   );
 
   return res.status(201).json(campaign.rows[0]);
+});
+
+campaignsRouter.patch("/:id", requireRole("admin", "treasurer"), async (req, res) => {
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), req.params.id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
+  const {
+    name,
+    targetAmount,
+    fixedContributionAmount,
+    whatsappHeaderText,
+    whatsappAdditionalInfo,
+  } = req.body;
+
+  const normalizedName = typeof name === "string" ? name.trim() : "";
+  const normalizedTargetAmount = targetAmount === undefined || targetAmount === null || targetAmount === ""
+    ? null
+    : Number(targetAmount);
+  const normalizedFixedContributionAmount = fixedContributionAmount === undefined || fixedContributionAmount === null || fixedContributionAmount === ""
+    ? null
+    : Number(fixedContributionAmount);
+
+  if (!normalizedName) {
+    return res.status(400).json({ error: "name is required" });
+  }
+
+  if (normalizedTargetAmount !== null && (!Number.isFinite(normalizedTargetAmount) || normalizedTargetAmount < 0)) {
+    return res.status(400).json({ error: "targetAmount must be a non-negative number or null" });
+  }
+
+  if (normalizedFixedContributionAmount !== null && (!Number.isFinite(normalizedFixedContributionAmount) || normalizedFixedContributionAmount < 0)) {
+    return res.status(400).json({ error: "fixedContributionAmount must be a non-negative number or null" });
+  }
+
+  const updated = await pool.query(
+    `
+    UPDATE campaigns
+    SET name = $2,
+        target_amount = $3,
+        fixed_contribution_amount = $4,
+        whatsapp_header_text = $5,
+        whatsapp_additional_info = $6
+    WHERE id = $1
+    RETURNING *
+    `,
+    [
+      req.params.id,
+      normalizedName,
+      normalizedTargetAmount,
+      normalizedFixedContributionAmount,
+      whatsappHeaderText === undefined ? null : whatsappHeaderText,
+      whatsappAdditionalInfo === undefined ? null : whatsappAdditionalInfo,
+    ]
+  );
+
+  if ((updated.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
+  return res.json(updated.rows[0]);
 });
 
 campaignsRouter.patch("/:id/target", requireRole("admin", "treasurer"), async (req, res) => {
@@ -61,6 +132,30 @@ campaignsRouter.patch("/:id/target", requireRole("admin", "treasurer"), async (r
   const updated = await pool.query(
     "UPDATE campaigns SET target_amount = $2 WHERE id = $1 RETURNING *",
     [req.params.id, targetAmount]
+  );
+  if ((updated.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
+  return res.json(updated.rows[0]);
+});
+
+campaignsRouter.patch("/:id/fixed-amount", requireRole("admin", "treasurer"), async (req, res) => {
+  const accessibleCampaign = await getAccessibleCampaign(getRequestUser(req), req.params.id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+
+  const value = req.body.fixedContributionAmount;
+  const fixedContributionAmount = value === null || value === "" || value === undefined ? null : Number(value);
+
+  if (fixedContributionAmount !== null && (!Number.isFinite(fixedContributionAmount) || fixedContributionAmount < 0)) {
+    return res.status(400).json({ error: "fixedContributionAmount must be a non-negative number or null" });
+  }
+
+  const updated = await pool.query(
+    "UPDATE campaigns SET fixed_contribution_amount = $2 WHERE id = $1 RETURNING *",
+    [req.params.id, fixedContributionAmount]
   );
   if ((updated.rowCount ?? 0) === 0) {
     return res.status(404).json({ error: "Campaign not found" });

@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
   group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   target_amount NUMERIC(14, 2),
+  fixed_contribution_amount NUMERIC(14, 2),
   whatsapp_header_text TEXT,
   whatsapp_additional_info TEXT,
   status campaign_status NOT NULL DEFAULT 'active',
@@ -66,9 +67,20 @@ CREATE TABLE IF NOT EXISTS campaigns (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS member_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  formal_name TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  identity_type identity_type NOT NULL DEFAULT 'individual',
+  alternate_senders JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS contributors (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  member_profile_id UUID REFERENCES member_profiles(id) ON DELETE SET NULL,
   formal_name TEXT NOT NULL,
   display_name TEXT NOT NULL,
   identity_type identity_type NOT NULL DEFAULT 'individual',
@@ -78,8 +90,23 @@ CREATE TABLE IF NOT EXISTS contributors (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  member_profile_id UUID NOT NULL REFERENCES member_profiles(id) ON DELETE RESTRICT,
+  total_amount NUMERIC(14, 2) NOT NULL,
+  reference_code TEXT UNIQUE NOT NULL,
+  message_raw TEXT NOT NULL,
+  source source_type NOT NULL,
+  sender_name TEXT NOT NULL,
+  event_time TEXT NOT NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  payment_id UUID REFERENCES payments(id) ON DELETE SET NULL,
   campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   contributor_id UUID NOT NULL REFERENCES contributors(id) ON DELETE RESTRICT,
   amount NUMERIC(14, 2) NOT NULL,
@@ -96,6 +123,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
   campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   method_type payment_method_type NOT NULL,
   value TEXT NOT NULL,
+  account_reference TEXT,
   label TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -110,6 +138,7 @@ CREATE TABLE IF NOT EXISTS confirmation_queue (
   parsed_timestamp TEXT NOT NULL,
   parsed_source source_type NOT NULL,
   raw_text TEXT NOT NULL,
+  allocation_plan JSONB,
   proposed_display_name TEXT,
   proposed_identity_type identity_type,
   match_score NUMERIC(5, 2),
@@ -125,6 +154,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ;
 ALTER TABLE groups ADD COLUMN IF NOT EXISTS brand_name TEXT;
 ALTER TABLE groups ADD COLUMN IF NOT EXISTS brand_color TEXT;
 ALTER TABLE groups ADD COLUMN IF NOT EXISTS brand_logo_path TEXT;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS fixed_contribution_amount NUMERIC(14, 2);
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS whatsapp_header_text TEXT;
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS whatsapp_additional_info TEXT;
+ALTER TABLE contributors ADD COLUMN IF NOT EXISTS member_profile_id UUID REFERENCES member_profiles(id) ON DELETE SET NULL;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_id UUID REFERENCES payments(id) ON DELETE SET NULL;
+ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS account_reference TEXT;
+ALTER TABLE confirmation_queue ADD COLUMN IF NOT EXISTS allocation_plan JSONB;
 `;

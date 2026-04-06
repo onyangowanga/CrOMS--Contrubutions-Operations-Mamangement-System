@@ -238,12 +238,16 @@ export function AppProvider({ children }) {
   const changePasswordMutation = useMutation({ mutationFn: (payload) => api.changePassword(payload) });
   const createGroupMutation = useMutation({ mutationFn: (payload) => api.createGroup(payload) });
   const createCampaignMutation = useMutation({ mutationFn: (payload) => api.createCampaign(payload) });
+  const updateCampaignMutation = useMutation({ mutationFn: ({ campaignId, payload }) => api.updateCampaign(campaignId, payload) });
+  const updateCampaignFixedContributionMutation = useMutation({ mutationFn: ({ campaignId, fixedContributionAmount }) => api.updateCampaignFixedContribution(campaignId, fixedContributionAmount) });
   const assignMemberMutation = useMutation({ mutationFn: ({ groupId, payload }) => api.assignGroupMember(groupId, payload) });
   const addPaymentMethodMutation = useMutation({ mutationFn: (payload) => api.createPaymentMethod(payload) });
+  const previewContributionAllocationMutation = useMutation({ mutationFn: (payload) => api.previewContributionAllocation(payload) });
   const parseTransactionMutation = useMutation({ mutationFn: (payload) => api.parseTransaction(payload) });
   const createManualTransactionMutation = useMutation({ mutationFn: (payload) => api.createManualTransaction(payload) });
   const approveConfirmationMutation = useMutation({ mutationFn: ({ confirmationId, payload }) => api.approveConfirmation(confirmationId, payload) });
   const rejectConfirmationMutation = useMutation({ mutationFn: ({ confirmationId, payload }) => api.rejectConfirmation(confirmationId, payload) });
+  const discardConfirmationMutation = useMutation({ mutationFn: (confirmationId) => api.discardConfirmation(confirmationId) });
   const updateCampaignStatusMutation = useMutation({ mutationFn: ({ campaignId, status }) => api.updateCampaignStatus(campaignId, status) });
   const deleteTransactionMutation = useMutation({ mutationFn: ({ transactionId, payload }) => api.deleteTransaction(transactionId, payload) });
 
@@ -264,12 +268,16 @@ export function AppProvider({ children }) {
     changePasswordMutation.isPending,
     createGroupMutation.isPending,
     createCampaignMutation.isPending,
+    updateCampaignMutation.isPending,
+    updateCampaignFixedContributionMutation.isPending,
     assignMemberMutation.isPending,
     addPaymentMethodMutation.isPending,
+    previewContributionAllocationMutation.isPending,
     parseTransactionMutation.isPending,
     createManualTransactionMutation.isPending,
     approveConfirmationMutation.isPending,
     rejectConfirmationMutation.isPending,
+    discardConfirmationMutation.isPending,
     updateCampaignStatusMutation.isPending,
     deleteTransactionMutation.isPending,
   ].some(Boolean);
@@ -313,6 +321,20 @@ export function AppProvider({ children }) {
     return response;
   }
 
+  async function updateCampaignFixedContribution(campaignId, fixedContributionAmount) {
+    const response = await updateCampaignFixedContributionMutation.mutateAsync({ campaignId, fixedContributionAmount });
+    log("Campaign fixed contribution updated", response);
+    await refreshCoreData(campaignId);
+    return response;
+  }
+
+  async function updateCampaign(campaignId, payload) {
+    const response = await updateCampaignMutation.mutateAsync({ campaignId, payload });
+    log("Campaign updated", response);
+    await refreshCoreData(campaignId);
+    return response;
+  }
+
   async function assignMember(groupId, payload) {
     const response = await assignMemberMutation.mutateAsync({ groupId, payload });
     log("Group member assigned", response);
@@ -325,6 +347,12 @@ export function AppProvider({ children }) {
     log("Payment method saved", response);
     await refreshCampaignDetails(payload.campaignId);
     await loadSummary(payload.campaignId, summaryOptions);
+    return response;
+  }
+
+  async function previewContributionAllocation(payload) {
+    const response = await previewContributionAllocationMutation.mutateAsync(payload);
+    log("Contribution allocation preview", response);
     return response;
   }
 
@@ -391,6 +419,13 @@ export function AppProvider({ children }) {
     });
     log("Confirmation rejected", response);
     await refreshCoreData(item.campaign_id);
+    return response;
+  }
+
+  async function discardConfirmation(item) {
+    const response = await discardConfirmationMutation.mutateAsync(item.id);
+    log("Confirmation discarded", response);
+    await refreshCoreData(item.campaign_id || response.campaignId);
     return response;
   }
 
@@ -545,12 +580,16 @@ export function AppProvider({ children }) {
         changePassword,
         createGroup,
         createCampaign,
+        updateCampaign,
+        updateCampaignFixedContribution,
         assignMember,
         addPaymentMethod,
+        previewContributionAllocation,
         parseTransaction,
         createManualTransaction,
         approveConfirmation,
         rejectConfirmation,
+        discardConfirmation,
         updateCampaignStatus,
         deleteTransaction,
         downloadContributorsCsv,

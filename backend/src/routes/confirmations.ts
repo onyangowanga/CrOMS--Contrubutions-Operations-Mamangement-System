@@ -2,7 +2,7 @@ import { Router } from "express";
 import { pool } from "../db/client";
 import { getRequestUser, requireAuth, requireRole } from "../middleware/auth";
 import { getAccessibleCampaign, isAdminUser } from "../lib/access";
-import { recordContribution } from "../services/contributions";
+import { postAllocatedContribution } from "../services/payments";
 import { generateWhatsappSummary } from "../services/summary";
 import { coalescePersonName } from "../utils/names";
 
@@ -83,19 +83,25 @@ confirmationsRouter.post("/:id/approve", requireRole("admin", "treasurer"), asyn
     const finalContributorId = contributorId || item.suggested_contributor_id || undefined;
     const finalDisplayName = coalescePersonName(displayName, item.proposed_display_name, item.parsed_sender_name) || item.parsed_sender_name;
     const finalIdentityType = identityType || item.proposed_identity_type || "individual";
+    const allocationPlan = item.allocation_plan && typeof item.allocation_plan === "object"
+      ? item.allocation_plan
+      : null;
 
-    const saved = await recordContribution(client, {
+    const saved = await postAllocatedContribution(client, {
       campaignId: item.campaign_id,
+      priorityCampaignId: allocationPlan?.priorityCampaignId || undefined,
       contributorId: finalContributorId,
       displayName: finalDisplayName,
       identityType: finalIdentityType,
       formalName: item.parsed_sender_name,
       senderName: item.parsed_sender_name,
-      amount: Number(item.parsed_amount),
-      transactionCode: item.parsed_transaction_code,
+      totalAmount: Number(item.parsed_amount),
+      allocations: Array.isArray(allocationPlan?.allocations) ? allocationPlan.allocations : undefined,
+      referenceCode: item.parsed_transaction_code,
       rawText: item.raw_text,
       source: item.parsed_source,
       timestamp: item.parsed_timestamp,
+      createdBy: user.id,
     });
 
     const updatedQueue = await client.query(
@@ -118,6 +124,9 @@ confirmationsRouter.post("/:id/approve", requireRole("admin", "treasurer"), asyn
     const whatsappSummary = await generateWhatsappSummary(item.campaign_id);
     return res.json({
       confirmation: updatedQueue.rows[0],
+      payment: saved.payment,
+      memberProfile: saved.memberProfile,
+      allocations: saved.transactions,
       contributor: saved.contributor,
       transaction: saved.transaction,
       whatsappSummary,
@@ -162,6 +171,34 @@ confirmationsRouter.post("/:id/reject", requireRole("admin", "treasurer"), async
   }
 
   return res.json({ confirmation: updated.rows[0] });
+});
+
+confirmationsRouter.delete("/:id", requireRole("admin", "treasurer"), async (req, res) => {
+  const user = getRequestUser(req);
+  const existing = await pool.query(
+    "SELECT campaign_id FROM confirmation_queue WHERE id = $1 AND status = 'pending'",
+    [req.params.id]
+  );
+
+  if ((existing.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Pending confirmation not found" });
+  }
+
+  const accessibleCampaign = await getAccessibleCampaign(user, existing.rows[0].campaign_id);
+  if (!accessibleCampaign) {
+    return res.status(404).json({ error: "Pending confirmation not found" });
+  }
+
+  const deleted = await pool.query(
+    "DELETE FROM confirmation_queue WHERE id = $1 AND status = 'pending' RETURNING id, campaign_id",
+    [req.params.id]
+  );
+
+  if ((deleted.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Pending confirmation not found" });
+  }
+
+  return res.json({ deleted: true, id: deleted.rows[0].id, campaignId: deleted.rows[0].campaign_id });
 });
 
 export { confirmationsRouter };

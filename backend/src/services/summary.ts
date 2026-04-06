@@ -12,6 +12,18 @@ function currency(value: number): string {
   return new Intl.NumberFormat("en-KE", { maximumFractionDigits: 2 }).format(value);
 }
 
+function normalizeSummaryBlock(value?: string | null): string[] {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\t+/g, " ").replace(/\s+$/g, "").trim())
+    .filter((line, index, lines) => line.length > 0 || (index > 0 && lines[index - 1].length > 0));
+}
+
 export async function generateWhatsappSummary(campaignId: string, options: SummaryOptions = {}): Promise<string> {
   const campaignResult = await pool.query(
     "SELECT id, name, target_amount, total_raised, whatsapp_header_text, whatsapp_additional_info FROM campaigns WHERE id = $1",
@@ -30,15 +42,18 @@ export async function generateWhatsappSummary(campaignId: string, options: Summa
   );
 
   const methodsResult = await pool.query(
-    "SELECT method_type, value, label FROM payment_methods WHERE campaign_id = $1 ORDER BY created_at ASC",
+    "SELECT method_type, value, account_reference, label FROM payment_methods WHERE campaign_id = $1 ORDER BY created_at ASC",
     [campaignId]
   );
 
-  const methodLines = (methodsResult.rows as Array<{ method_type: string; value: string; label: string }>).length
-    ? (methodsResult.rows as Array<{ method_type: string; value: string; label: string }>)
-        .map((m) => `${m.method_type.toUpperCase()}: ${m.value} (${m.label})`)
-        .join("\n")
-    : "No payment method configured yet.";
+  const methodLines = (methodsResult.rows as Array<{ method_type: string; value: string; account_reference?: string | null; label: string }>)
+    .map((m) => {
+      if (m.method_type === "paybill" && m.account_reference) {
+        return `PAYBILL: ${m.value} Account: ${m.account_reference} (${m.label})`;
+      }
+
+      return `${m.method_type.toUpperCase()}: ${m.value} (${m.label})`;
+    });
 
   const contributorLines = (contribResult.rows as Array<{ display_name: string; formal_name: string; total_contributed: string }>).length
     ? (contribResult.rows as Array<{ display_name: string; formal_name: string; total_contributed: string }>)
@@ -54,20 +69,28 @@ export async function generateWhatsappSummary(campaignId: string, options: Summa
   const deficit = targetAmount === null ? null : Math.max(targetAmount - totalRaised, 0);
   const headerText = options.headerText?.trim() || campaign.whatsapp_header_text?.trim() || `${normalizePersonName(campaign.name) || campaign.name} - CONTRIBUTION UPDATE`;
   const additionalInfo = options.additionalInfo?.trim() || campaign.whatsapp_additional_info?.trim();
+  const headerLines = normalizeSummaryBlock(headerText);
+  const additionalLines = normalizeSummaryBlock(additionalInfo);
 
-  const lines = [
-    `*${headerText}*`,
-  ];
+  const lines = headerLines.length > 0
+    ? [`*${headerLines[0]}*`, ...headerLines.slice(1)]
+    : [`*${headerText}*`];
 
-  if (additionalInfo) {
-    lines.push(additionalInfo);
+  if (additionalLines.length > 0) {
+    lines.push("", ...additionalLines);
+  }
+
+  lines.push("");
+
+  if (methodLines.length > 0) {
+    lines.push(
+      "You can still contribute via:",
+      methodLines.join("\n"),
+      "",
+    );
   }
 
   lines.push(
-    "",
-    "You can still contribute via:",
-    methodLines,
-    "",
     "--------------------------------",
     contributorLines,
     "--------------------------------",

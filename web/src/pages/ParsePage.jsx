@@ -19,6 +19,58 @@ function extractPreview(rawText, displayName) {
   };
 }
 
+function AllocationEditor({ campaigns, allocationPreview, onPriorityChange, onAllocationChange }) {
+  if (!allocationPreview) {
+    return null;
+  }
+
+  return (
+    <div className="allocation-panel field-full">
+      <div className="allocation-panel-head">
+        <div>
+          <strong>Allocation Preview</strong>
+          <p>Review the suggested split and adjust amounts only where needed.</p>
+        </div>
+        <div className="allocation-balance">Unallocated: KES {Number(allocationPreview.unallocatedAmount || 0).toLocaleString()}</div>
+      </div>
+      <div className="form-grid compact allocation-grid">
+      <SelectField
+        label="Priority Campaign"
+        value={allocationPreview.priorityCampaignId}
+        helperText="Suggestions fill fixed campaign amounts first, then place any balance on this campaign."
+        options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))}
+        onChange={onPriorityChange}
+      />
+      <div className="field field-full">
+        <div className="stack-list compact-list allocation-list">
+          {allocationPreview.allocations.map((allocation) => (
+            <article className="list-card allocation-card" key={allocation.campaignId}>
+              <div className="list-card-top">
+                <strong>{allocation.campaignName}</strong>
+                <span className="badge neutral">
+                  {allocation.fixedContributionAmount === null ? "Open amount" : `Fixed KES ${allocation.fixedContributionAmount.toLocaleString()}`}
+                </span>
+              </div>
+              <div className="metric-row">
+                <span>Already contributed: KES {Number(allocation.alreadyContributed || 0).toLocaleString()}</span>
+                <span>Outstanding: {allocation.outstandingAmount === null ? "Not set" : `KES ${Number(allocation.outstandingAmount || 0).toLocaleString()}`}</span>
+              </div>
+              <TextField
+                label="Allocated Amount"
+                type="number"
+                value={String(allocation.suggestedAmount || "")}
+                helperText="Set to zero to exclude this campaign from the current payment."
+                onChange={(value) => onAllocationChange(allocation.campaignId, value)}
+              />
+            </article>
+          ))}
+        </div>
+      </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ParsePage() {
   const {
     campaigns,
@@ -27,6 +79,7 @@ export default function ParsePage() {
     selectedCampaign,
     selectedCampaignId,
     setSelectedCampaignId,
+    previewContributionAllocation,
     parseTransaction,
     createManualTransaction,
     confirmations,
@@ -43,6 +96,7 @@ export default function ParsePage() {
     updateReviewDraft,
     approveConfirmation,
     rejectConfirmation,
+    discardConfirmation,
     getErrorMessage,
   } = useAppContext();
   const [activeTab, setActiveTab] = useState("mpesa");
@@ -53,12 +107,15 @@ export default function ParsePage() {
   const [summaryForm, setSummaryForm] = useState(summaryOptions);
   const [parseForm, setParseForm] = useState({
     campaignId: selectedCampaignId,
+    priorityCampaignId: selectedCampaignId,
     displayName: "",
     identityType: "individual",
     rawText: "",
+    allocations: [],
   });
   const [manualForm, setManualForm] = useState({
     campaignId: selectedCampaignId,
+    priorityCampaignId: selectedCampaignId,
     contributorId: "",
     displayName: "",
     identityType: "individual",
@@ -66,7 +123,11 @@ export default function ParsePage() {
     referenceCode: "",
     eventTime: "",
     note: "",
+    allocations: [],
   });
+  const [parseAllocationPreview, setParseAllocationPreview] = useState(null);
+  const [manualAllocationPreview, setManualAllocationPreview] = useState(null);
+  const [activeReviewSource, setActiveReviewSource] = useState("");
 
   useEffect(() => {
     if (!selectedCampaignId && campaigns[0]?.id) {
@@ -76,11 +137,13 @@ export default function ParsePage() {
     setParseForm((current) => ({
       ...current,
       campaignId: current.campaignId || selectedCampaignId || campaigns[0]?.id || "",
+      priorityCampaignId: current.priorityCampaignId || current.campaignId || selectedCampaignId || campaigns[0]?.id || "",
     }));
 
     setManualForm((current) => ({
       ...current,
       campaignId: current.campaignId || selectedCampaignId || campaigns[0]?.id || "",
+      priorityCampaignId: current.priorityCampaignId || current.campaignId || selectedCampaignId || campaigns[0]?.id || "",
     }));
   }, [campaigns, selectedCampaignId, setSelectedCampaignId]);
 
@@ -99,12 +162,104 @@ export default function ParsePage() {
   const activeReviewItem = confirmations.find((item) => item.id === activeReviewId) || null;
   const activeDraft = activeReviewItem ? ensureReviewDraft(activeReviewItem) : null;
 
-  function openReviewPopup(item) {
-    setActiveReviewId(item.id);
+  function normalizeAllocations(allocationPreview) {
+    if (!allocationPreview) {
+      return [];
+    }
+
+    return allocationPreview.allocations
+      .map((allocation) => ({
+        campaignId: allocation.campaignId,
+        amount: Number(allocation.suggestedAmount || 0),
+      }))
+      .filter((allocation) => allocation.amount > 0);
   }
 
-  function closeReviewPopup() {
+  function updateAllocationPreview(setter, campaignId, value) {
+    setter((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const numericValue = value === "" ? 0 : Number(value);
+      const allocations = current.allocations.map((allocation) => (
+        allocation.campaignId === campaignId
+          ? { ...allocation, suggestedAmount: Number.isFinite(numericValue) ? numericValue : allocation.suggestedAmount }
+          : allocation
+      ));
+      const allocatedTotal = allocations.reduce((sum, allocation) => sum + Number(allocation.suggestedAmount || 0), 0);
+
+      return {
+        ...current,
+        allocations,
+        unallocatedAmount: Number(current.totalAmount || 0) - allocatedTotal,
+      };
+    });
+  }
+
+  async function loadAllocationPreview(mode, nextPriorityCampaignId) {
+    const isManual = mode === "manual";
+    const form = isManual ? manualForm : parseForm;
+    const amount = isManual ? Number(form.amount || 0) : Number(extractPreview(form.rawText, form.displayName).amount.replace(/[^\d.]/g, "")) || 0;
+
+    if (!form.campaignId || !amount) {
+      const message = "Select a campaign and provide a valid payment amount before previewing allocations.";
+      showNotice({ tone: "error", title: "Allocation preview failed", message });
+      return;
+    }
+
+    try {
+      const preview = await previewContributionAllocation({
+        campaignId: form.campaignId,
+        priorityCampaignId: nextPriorityCampaignId || form.priorityCampaignId || form.campaignId,
+        contributorId: isManual ? form.contributorId || undefined : undefined,
+        displayName: form.displayName || undefined,
+        identityType: form.identityType || undefined,
+        amount,
+      });
+
+      if (isManual) {
+        setManualAllocationPreview(preview);
+        setManualForm((current) => ({ ...current, allocations: normalizeAllocations(preview) }));
+      } else {
+        setParseAllocationPreview(preview);
+        setParseForm((current) => ({ ...current, allocations: normalizeAllocations(preview) }));
+      }
+    } catch (error) {
+      showNotice({ tone: "error", title: "Allocation preview failed", message: getErrorMessage(error, "Unable to calculate a suggested split.") });
+    }
+  }
+
+  function messageNeedsDisplayName(rawText, displayName) {
+    if (typeof displayName === "string" && displayName.trim()) {
+      return false;
+    }
+
+    const normalized = rawText.replace(/\s+/g, " ").trim();
+    if (/\bfor\s+account\b/i.test(normalized)) {
+      return true;
+    }
+
+    return !/received\s+from\s+|from\s+[A-Za-z][A-Za-z .,'-]{2,}?/i.test(normalized);
+  }
+
+  function openReviewPopup(item, source = "existing") {
+    setActiveReviewId(item.id);
+    setActiveReviewSource(source);
+  }
+
+  async function closeReviewPopup(skipDiscard = false) {
+    if (!skipDiscard && activeReviewItem && activeReviewSource === "fresh") {
+      try {
+        await discardConfirmation(activeReviewItem);
+        showNotice({ tone: "success", title: "Queued transaction discarded", message: "The queued transaction was removed because the review popup was closed without approval." });
+      } catch (error) {
+        showNotice({ tone: "error", title: "Discard queued transaction failed", message: getErrorMessage(error, "Unable to discard the queued transaction.") });
+      }
+    }
+
     setActiveReviewId("");
+    setActiveReviewSource("");
   }
 
   async function copySummary() {
@@ -116,6 +271,18 @@ export default function ParsePage() {
     } catch (error) {
       showNotice({ tone: "error", title: "Copy failed", message: getErrorMessage(error, "Clipboard access was denied.") });
     }
+  }
+
+  function openWhatsappSummary() {
+    clearNotice();
+
+    if (!summaryText || !summaryText.trim()) {
+      showNotice({ tone: "error", title: "WhatsApp open failed", message: "Refresh the summary before opening WhatsApp." });
+      return;
+    }
+
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(summaryText)}`;
+    window.open(whatsappUrl, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -143,7 +310,18 @@ export default function ParsePage() {
                 return;
               }
 
-              const preview = extractPreview(parseForm.rawText, parseForm.displayName);
+              let nextDisplayName = parseForm.displayName;
+              if (messageNeedsDisplayName(parseForm.rawText, parseForm.displayName)) {
+                nextDisplayName = window.prompt("This transaction message does not contain the contributor name. Enter a display name before posting.", parseForm.displayName || "") || "";
+                if (!nextDisplayName.trim()) {
+                  showNotice({ tone: "error", title: "Display name required", message: "Enter a display name before posting this transaction." });
+                  return;
+                }
+
+                setParseForm((current) => ({ ...current, displayName: nextDisplayName }));
+              }
+
+              const preview = extractPreview(parseForm.rawText, nextDisplayName);
               const confirmed = await requestConfirmation({
                 title: "Post M-Pesa contribution",
                 message: "Please review this transaction before it is posted to the campaign ledger.",
@@ -160,10 +338,15 @@ export default function ParsePage() {
               }
 
               try {
-                const response = await parseTransaction(parseForm);
+                const response = await parseTransaction({
+                  ...parseForm,
+                  displayName: nextDisplayName,
+                  priorityCampaignId: parseForm.priorityCampaignId || parseForm.campaignId,
+                  allocations: normalizeAllocations(parseAllocationPreview),
+                });
                 setParseResult(response);
                 if (response.status === "queued" && response.confirmation?.id) {
-                  openReviewPopup(response.confirmation);
+                  openReviewPopup(response.confirmation, "fresh");
                 }
               } catch (error) {
                 log("Parse failed", error instanceof Error ? error.message : "Unknown parse error");
@@ -171,12 +354,32 @@ export default function ParsePage() {
               }
             }}
           >
-            <SelectField label="Campaign" value={parseForm.campaignId} helperText="Choose the campaign that should receive this payment." options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))} onChange={(value) => setParseForm((current) => ({ ...current, campaignId: value }))} />
+            <SelectField label="Campaign" value={parseForm.campaignId} helperText="Choose the campaign that should receive this payment." options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))} onChange={(value) => {
+              setParseAllocationPreview(null);
+              setParseForm((current) => ({ ...current, campaignId: value, priorityCampaignId: value, allocations: [] }));
+            }} />
             <TextField label="Display Name Override" value={parseForm.displayName} helperText="Optional corrected contributor name if the sender text needs help." onChange={(value) => setParseForm((current) => ({ ...current, displayName: value }))} />
             <SelectField label="Identity Type" value={parseForm.identityType} helperText="Set the contributor type when the sender should be stored differently." options={identityTypes} onChange={(value) => setParseForm((current) => ({ ...current, identityType: value }))} />
-            <div />
+            <div className="form-actions-inline">
+              <button className="primary-button button-inline" type="button" onClick={() => loadAllocationPreview("parse")}>Preview Allocation</button>
+            </div>
             <TextAreaField label="Raw Message" rows={8} helperText="Paste the full M-Pesa confirmation message exactly as received." value={parseForm.rawText} onChange={(value) => setParseForm((current) => ({ ...current, rawText: value }))} />
-            <button className="primary-button" type="submit">{loading ? "Processing..." : "Post M-Pesa Payment"}</button>
+            <AllocationEditor
+              campaigns={campaigns}
+              allocationPreview={parseAllocationPreview}
+              onPriorityChange={async (value) => {
+                setParseForm((current) => ({ ...current, priorityCampaignId: value }));
+                if (parseAllocationPreview) {
+                  await loadAllocationPreview("parse", value);
+                }
+              }}
+              onAllocationChange={(campaignId, value) => {
+                updateAllocationPreview(setParseAllocationPreview, campaignId, value);
+              }}
+            />
+            <div className="form-actions-inline field-full">
+              <button className="primary-button button-inline" type="submit">{loading ? "Processing..." : "Post M-Pesa Payment"}</button>
+            </div>
           </form>
         ) : (
           <form
@@ -209,7 +412,11 @@ export default function ParsePage() {
               }
 
               try {
-                const response = await createManualTransaction(manualForm);
+                const response = await createManualTransaction({
+                  ...manualForm,
+                  priorityCampaignId: manualForm.priorityCampaignId || manualForm.campaignId,
+                  allocations: normalizeAllocations(manualAllocationPreview),
+                });
                 setManualResult(response);
                 setManualForm((current) => ({
                   ...current,
@@ -219,7 +426,9 @@ export default function ParsePage() {
                   referenceCode: "",
                   eventTime: "",
                   note: "",
+                  allocations: [],
                 }));
+                setManualAllocationPreview(null);
               } catch (error) {
                 const message = error instanceof Error ? error.message : "Unknown manual contribution error";
                 showNotice({ tone: "error", title: "Manual contribution failed", message });
@@ -227,15 +436,36 @@ export default function ParsePage() {
               }
             }}
           >
-            <SelectField label="Campaign" value={manualForm.campaignId} helperText="Choose the campaign that should receive this cash contribution." options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))} onChange={(value) => setManualForm((current) => ({ ...current, campaignId: value }))} />
+            <SelectField label="Campaign" value={manualForm.campaignId} helperText="Choose the campaign that should receive this cash contribution." options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))} onChange={(value) => {
+              setManualAllocationPreview(null);
+              setManualForm((current) => ({ ...current, campaignId: value, priorityCampaignId: value, allocations: [] }));
+            }} />
             <SelectField label="Existing Contributor" value={manualForm.contributorId} helperText="Select an existing contributor or leave blank and type a name below." options={contributors.map((contributor) => ({ value: contributor.id, label: formatPersonName(contributor.display_name, contributor.formal_name) }))} onChange={(value) => setManualForm((current) => ({ ...current, contributorId: value }))} />
             <TextField label="Display Name" value={manualForm.displayName} helperText="Use this when the cash giver is not already in the list above." onChange={(value) => setManualForm((current) => ({ ...current, displayName: value }))} />
             <SelectField label="Identity Type" value={manualForm.identityType} helperText="Store the contribution under the right contributor type." options={identityTypes} onChange={(value) => setManualForm((current) => ({ ...current, identityType: value }))} />
             <TextField label="Amount" type="number" helperText="Enter the contribution amount in Kenya shillings." value={manualForm.amount} onChange={(value) => setManualForm((current) => ({ ...current, amount: value }))} />
+            <div className="form-actions-inline">
+              <button className="primary-button button-inline" type="button" onClick={() => loadAllocationPreview("manual")}>Preview Allocation</button>
+            </div>
             <TextField label="Reference Code" value={manualForm.referenceCode} helperText="Optional cash receipt or manual reference code." onChange={(value) => setManualForm((current) => ({ ...current, referenceCode: value }))} />
             <TextField label="Received At" type="datetime-local" helperText="Optional received date and time for the cash payment." value={manualForm.eventTime} onChange={(value) => setManualForm((current) => ({ ...current, eventTime: value }))} />
             <TextField label="Note" value={manualForm.note} helperText="Optional context such as event name, basket, or collector note." onChange={(value) => setManualForm((current) => ({ ...current, note: value }))} />
-            <button className="primary-button" type="submit">{loading ? "Processing..." : "Post Cash Payment"}</button>
+            <AllocationEditor
+              campaigns={campaigns}
+              allocationPreview={manualAllocationPreview}
+              onPriorityChange={async (value) => {
+                setManualForm((current) => ({ ...current, priorityCampaignId: value }));
+                if (manualAllocationPreview) {
+                  await loadAllocationPreview("manual", value);
+                }
+              }}
+              onAllocationChange={(campaignId, value) => {
+                updateAllocationPreview(setManualAllocationPreview, campaignId, value);
+              }}
+            />
+            <div className="form-actions-inline field-full">
+              <button className="primary-button button-inline" type="submit">{loading ? "Processing..." : "Post Cash Payment"}</button>
+            </div>
           </form>
         )}
 
@@ -280,14 +510,15 @@ export default function ParsePage() {
                 showNotice({ tone: "error", title: "Summary refresh failed", message: getErrorMessage(error, "Unable to refresh the summary.") });
               }
             }}>Refresh</button>
+            <button className="primary-button whatsapp-button" type="button" onClick={openWhatsappSummary}>Open WhatsApp</button>
             <button className="primary-button" type="button" onClick={copySummary}>Copy Summary</button>
           </div>
         }
       >
         <div className="form-grid compact summary-settings compact-row">
           <SelectField label="Campaign" value={selectedCampaignId} helperText="Change the campaign if you want to preview another WhatsApp update." options={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))} onChange={setSelectedCampaignId} />
-          <TextField label="Top Message" value={summaryForm.headerText} helperText="This defaults from the campaign setup but can be edited before copying the message." onChange={(value) => setSummaryForm((current) => ({ ...current, headerText: value }))} />
-          <TextField label="Additional Line" value={summaryForm.additionalInfo} helperText="Optional line shown just below the top WhatsApp message." onChange={(value) => setSummaryForm((current) => ({ ...current, additionalInfo: value }))} />
+          <TextAreaField label="Top Message" rows={4} value={summaryForm.headerText} helperText="This defaults from the campaign setup and can contain multiple lines for a full narrative header." onChange={(value) => setSummaryForm((current) => ({ ...current, headerText: value }))} />
+          <TextAreaField label="Additional Line" rows={5} value={summaryForm.additionalInfo} helperText="Optional extra block shown below the top message, including payment guidance or reminders." onChange={(value) => setSummaryForm((current) => ({ ...current, additionalInfo: value }))} />
           <label className="field checkbox-field">
             <span>Summary Options</span>
             <div className="checkbox-stack">
@@ -313,6 +544,7 @@ export default function ParsePage() {
                 <span className="badge neutral">{method.method_type}</span>
               </div>
               <p>{method.value}</p>
+              {method.account_reference ? <small>Account: {method.account_reference}</small> : null}
             </article>
           ))}
         </div>
@@ -354,7 +586,7 @@ export default function ParsePage() {
 
                 try {
                   await approveConfirmation(activeReviewItem, activeDraft);
-                  closeReviewPopup();
+                  await closeReviewPopup(true);
                 } catch (error) {
                   showNotice({ tone: "error", title: "Approve confirmation failed", message: getErrorMessage(error, "Unable to approve the queued contribution.") });
                 }
@@ -363,7 +595,7 @@ export default function ParsePage() {
                 clearNotice();
                 try {
                   await rejectConfirmation(activeReviewItem, activeDraft);
-                  closeReviewPopup();
+                  await closeReviewPopup(true);
                 } catch (error) {
                   showNotice({ tone: "error", title: "Reject confirmation failed", message: getErrorMessage(error, "Unable to reject the queued contribution.") });
                 }

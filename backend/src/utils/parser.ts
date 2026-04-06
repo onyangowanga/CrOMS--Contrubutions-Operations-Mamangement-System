@@ -19,6 +19,11 @@ const senderPatterns = [
   /(?:sender|sent\s+by|credited\s+by|deposited\s+by|paid\s+by)\s+([A-Za-z][A-Za-z .,'-]{2,}?)(?=\.|\s+on\b|\s+at\b|$)/i,
 ];
 
+const accountPatterns = [
+  /for\s+account\s+([A-Za-z0-9&][A-Za-z0-9& .,'\/-]{1,}?)(?=\s+on\b|\s+at\b|\.|\s+new\b|$)/i,
+  /account[:\s]+([A-Za-z0-9&][A-Za-z0-9& .,'\/-]{1,}?)(?=\s+on\b|\s+at\b|\.|\s+new\b|$)/i,
+];
+
 const datePatterns = [
   /on\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+at\s+(\d{1,2}:\d{2}\s?(?:AM|PM)?)/i,
   /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})(?:\s+(\d{1,2}:\d{2}\s?(?:AM|PM)?))?/i,
@@ -92,9 +97,14 @@ export function parseTransactionText(rawText: string, fallbackSenderName?: strin
   const amountMatch = extractFirstMatch(normalizedText, amountPatterns);
   const transactionCode = extractTransactionCode(normalizedText);
   const senderMatch = extractFirstMatch(normalizedText, senderPatterns);
-  const senderName = senderMatch?.[1]
+  const accountMatch = extractFirstMatch(normalizedText, accountPatterns);
+  const manualSenderName = normalizePersonName(fallbackSenderName?.trim()) || fallbackSenderName?.trim();
+  const parsedSenderName = senderMatch?.[1]
     ? normalizeSenderName(senderMatch[1])
-    : normalizePersonName(fallbackSenderName?.trim()) || fallbackSenderName?.trim();
+    : accountMatch?.[1]
+      ? normalizeSenderName(accountMatch[1])
+      : null;
+  const senderName = manualSenderName || parsedSenderName;
 
   if (!amountMatch || !transactionCode || !senderName) {
     throw new Error("Could not parse one or more required fields from message");
